@@ -16,7 +16,7 @@ tracing = "0.1"
 futures-util = "0.3"
 bytes = "1"
 mime_guess = "2"
-rustls = { version = "0.23", features = ["ring"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 rustls-pemfile = "2"
 
 [dev-dependencies]
