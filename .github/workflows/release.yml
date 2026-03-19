@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Release (${{ matrix.os }} ${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            archive: tar.gz
+            binary_name: cleanserve
+            suffix: ''
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            archive: tar.gz
+            binary_name: cleanserve
+            suffix: ''
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            archive: tar.gz
+            binary_name: cleanserve
+            suffix: ''
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: zip
+            binary_name: cleanserve.exe
+            suffix: '.exe'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          rustup target add ${{ matrix.target }}
+          rustup set default-toolchain stable
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Set output name
+        id: output
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          OS_NAME=""
+          case "${{ matrix.os }}" in
+            ubuntu-latest) OS_NAME="linux" ;;
+            macos-latest)  OS_NAME="darwin" ;;
+            windows-latest) OS_NAME="windows" ;;
+          esac
+          ARCH_NAME=""
+          case "${{ matrix.target }}" in
+            x86_64-*) ARCH_NAME="x86_64" ;;
+            aarch64-*) ARCH_NAME="aarch64" ;;
+          esac
+          echo "file_name=cleanserve-${OS_NAME}-${ARCH_NAME}" >> $GITHUB_OUTPUT
+          echo "archive_ext=${{ matrix.archive }}" >> $GITHUB_OUTPUT
+
+      - name: Package (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        working-directory: target/${{ matrix.target }}/release/
+        run: |
+          tar -czf cleanserve-${{ steps.output.outputs.file_name }}.tar.gz ${{ matrix.binary_name }}
+
+      - name: Package (zip)
+        if: matrix.archive == 'zip'
+        working-directory: target/${{ matrix.target }}/release/
+        run: |
+          powershell -Command "Compress-Archive -Path ${{ matrix.binary_name }} -DestinationPath cleanserve-${{ steps.output.outputs.file_name }}.zip"
+
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            target/${{ matrix.target }}/release/cleanserve-${{ steps.output.outputs.file_name }}.${{ matrix.archive }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -3,7 +3,6 @@
 set -e
 
 BINARY_NAME="cleanserve"
-VERSION="0.1.0"
 REPO_URL="https://github.com/LyeZinho/cleanserve"
 DOWNLOAD_URL_BASE="${REPO_URL}/releases/latest/download"
 
@@ -36,22 +35,29 @@ trap cleanup EXIT
 
 printf "\n  ${BOLD}CleanServe Installer${NC}\n\n"
 
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
+_detect() {
+  OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  ARCH="$(uname -m)"
 
-case "${OS}" in
-  linux) OS_NAME="linux" ;;
-  darwin) OS_NAME="darwin" ;;
-  msys*|cygwin*|mingw*|nt)
-    error "Windows detected. Please use the Windows installer or download the binary directly from ${REPO_URL}/releases."
-    ;;
-  *) error "Unsupported OS: ${OS}" ;;
-esac
+  case "${OS}" in
+    linux)       OS_NAME="linux" ;;
+    darwin)      OS_NAME="darwin" ;;
+    mingw*|msys*) OS_NAME="windows" ;;
+    *)           error "Unsupported OS: ${OS}. For Windows, download the .zip from ${REPO_URL}/releases/latest" ;;
+  esac
 
-case "${ARCH}" in
-  x86_64|amd64) ARCH_NAME="x86_64" ;;
-  aarch64|arm64) ARCH_NAME="aarch64" ;;
-  *) error "Unsupported architecture: ${ARCH}" ;;
+  case "${ARCH}" in
+    x86_64|amd64)  ARCH_NAME="x86_64" ;;
+    aarch64|arm64) ARCH_NAME="aarch64" ;;
+    *)              error "Unsupported architecture: ${ARCH}" ;;
+  esac
+}
+
+_detect
+
+case "${OS_NAME}" in
+  windows) EXTRACT="unzip -o" ;;
+  *)       EXTRACT="tar -xzf" ;;
 esac
 
 info "Detected: ${OS_NAME} ${ARCH_NAME}"
@@ -64,23 +70,36 @@ else
   error "Neither curl nor wget found. Please install one of them."
 fi
 
-if ! command -v tar >/dev/null 2>&1; then
-  error "tar is required but not found."
-fi
-
 TMP_DIR="$(mktemp -d)"
-FILE_NAME="${BINARY_NAME}-${OS_NAME}-${ARCH_NAME}.tar.gz"
+if [ "${OS_NAME}" = "windows" ]; then
+  EXT="zip"
+  FILE_NAME="${BINARY_NAME}-${OS_NAME}-${ARCH_NAME}.${EXT}"
+else
+  EXT="tar.gz"
+  FILE_NAME="${BINARY_NAME}-${OS_NAME}-${ARCH_NAME}.${EXT}"
+fi
 DOWNLOAD_URL="${DOWNLOAD_URL_BASE}/${FILE_NAME}"
 
-info "Downloading ${BINARY_NAME} v${VERSION}..."
+info "Downloading ${BINARY_NAME}..."
 if ! ${DOWNLOAD_CMD} "${DOWNLOAD_URL}" > "${TMP_DIR}/${FILE_NAME}"; then
   error "Failed to download ${DOWNLOAD_URL}"
 fi
 
 info "Extracting..."
-tar -xzf "${TMP_DIR}/${FILE_NAME}" -C "${TMP_DIR}"
-if [ ! -f "${TMP_DIR}/${BINARY_NAME}" ]; then
-  error "Binary not found in archive."
+${EXTRACT} "${TMP_DIR}/${FILE_NAME}" -d "${TMP_DIR}"
+
+# Handle .exe on Windows
+if [ "${OS_NAME}" = "windows" ]; then
+  if [ -f "${TMP_DIR}/${BINARY_NAME}.exe" ]; then
+    BIN_PATH="${TMP_DIR}/${BINARY_NAME}.exe"
+  else
+    error "Binary not found in archive."
+  fi
+else
+  if [ ! -f "${TMP_DIR}/${BINARY_NAME}" ]; then
+    error "Binary not found in archive."
+  fi
+  BIN_PATH="${TMP_DIR}/${BINARY_NAME}"
 fi
 
 INSTALL_DIR="/usr/local/bin"
@@ -89,16 +108,20 @@ if [ ! -w "${INSTALL_DIR}" ]; then
   mkdir -p "${INSTALL_DIR}"
 fi
 
-info "Installing to ${INSTALL_DIR}/${BINARY_NAME}..."
-mv "${TMP_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/${BINARY_NAME}"
-chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
-
-if ! command -v "${BINARY_NAME}" >/dev/null 2>&1 && [ ! -x "${INSTALL_DIR}/${BINARY_NAME}" ]; then
-  error "Installation failed: ${BINARY_NAME} not found."
+info "Installing to ${INSTALL_DIR}..."
+if [ "${OS_NAME}" = "windows" ]; then
+  cp "${BIN_PATH}" "${INSTALL_DIR}/${BINARY_NAME}.exe"
+  chmod +x "${INSTALL_DIR}/${BINARY_NAME}.exe"
+else
+  mv "${BIN_PATH}" "${INSTALL_DIR}/${BINARY_NAME}"
+  chmod +x "${INSTALL_DIR}/${BINARY_NAME}"
 fi
 
-if "${INSTALL_DIR}/${BINARY_NAME}" --version >/dev/null 2>&1; then
-  INSTALLED_VERSION=$("${INSTALL_DIR}/${BINARY_NAME}" --version | head -n 1)
+INSTALLED_NAME="${BINARY_NAME}"
+[ "${OS_NAME}" = "windows" ] && INSTALLED_NAME="${BINARY_NAME}.exe"
+
+if "${INSTALL_DIR}/${INSTALLED_NAME}" --version >/dev/null 2>&1; then
+  INSTALLED_VERSION=$("${INSTALL_DIR}/${INSTALLED_NAME}" --version | head -n 1)
   success "CleanServe ${INSTALLED_VERSION} installed successfully!"
 else
   success "CleanServe installed successfully!"
@@ -108,7 +131,7 @@ case ":${PATH}:" in
   *:"${INSTALL_DIR}":*) ;;
   *)
     warn "${INSTALL_DIR} is not in your PATH."
-    
+
     SHELL_NAME="$(basename "${SHELL}")"
     case "${SHELL_NAME}" in
       zsh)  RC_FILE="~/.zshrc" ;;

@@ -1,0 +1,34 @@
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo lock (typically not committed for libraries)
+# Uncomment if you want it:
+# Cargo.lock
+
+# Build output binaries
+*.pdb
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE files
+.idea/
+*.swp
+*.swo
+*~
+.vscode/
+*.code-workspace
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+
+# Editor/backup files
+*.orig
+*.bak
