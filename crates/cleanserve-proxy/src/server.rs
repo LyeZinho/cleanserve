@@ -1,4 +1,4 @@
-use cleanserve_core::{RateLimiter, RequestValidator, StaticBlacklist};
+use cleanserve_core::{RateLimiter, RequestValidator, StaticBlacklist, PathTraversal};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -235,10 +235,21 @@ async fn handle_request(
                 format!(r#"{{"error":"header_too_large","message":"{}"}}"#, msg),
             )))
             .expect("valid 431 response"));
-    }
+     }
 
      let path = req.uri().path();
      let method = req.method();
+
+     if !PathTraversal::is_valid_request_path(path) {
+         warn!("Invalid path detected - traversal attack: {}", path);
+         return Ok(Response::builder()
+             .status(StatusCode::BAD_REQUEST)
+             .header("Content-Type", "application/json")
+             .body(Full::new(Bytes::from(
+                 r#"{"error":"bad_request","message":"Invalid path format"}"#
+             )))
+             .expect("valid 400 response"));
+     }
 
      // Check static file blacklist
      if StaticBlacklist::is_blocked(path) {
