@@ -1,4 +1,4 @@
-use cleanserve_core::{RateLimiter, RequestValidator};
+use cleanserve_core::{RateLimiter, RequestValidator, StaticBlacklist};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -237,10 +237,34 @@ async fn handle_request(
             .expect("valid 431 response"));
     }
 
-    let path = req.uri().path();
-    let method = req.method();
+     let path = req.uri().path();
+     let method = req.method();
 
-    if method == Method::GET {
+     // Check static file blacklist
+     if StaticBlacklist::is_blocked(path) {
+         warn!("Attempted to access blacklisted path: {}", path);
+         return Ok(Response::builder()
+             .status(StatusCode::FORBIDDEN)
+             .header("Content-Type", "application/json")
+             .body(Full::new(Bytes::from(
+                 r#"{"error":"forbidden","message":"This file cannot be accessed"}"#,
+             )))
+             .expect("valid 403 response"));
+     }
+
+     // Check for dangerous uploads
+     if StaticBlacklist::is_in_upload_dir(path) && StaticBlacklist::is_dangerous_upload(path) {
+         warn!("Attempted to serve dangerous upload: {}", path);
+         return Ok(Response::builder()
+             .status(StatusCode::FORBIDDEN)
+             .header("Content-Type", "application/json")
+             .body(Full::new(Bytes::from(
+                 r#"{"error":"forbidden","message":"Executable uploads are not allowed"}"#,
+             )))
+             .expect("valid 403 response"));
+     }
+
+     if method == Method::GET {
         let file_path = PathBuf::from(root.as_str()).join(path);
         
         if file_path.starts_with(root.as_str()) && file_path.is_file() {
