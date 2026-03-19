@@ -7,29 +7,62 @@ on:
     branches: [main]
 
 jobs:
-  build:
+  test-linux:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add target
+        run: rustup target add x86_64-unknown-linux-gnu
+      - name: Build
+        run: cargo build --release --target x86_64-unknown-linux-gnu
+      - name: Run tests
+        run: cargo test --release --target x86_64-unknown-linux-gnu
+
+  test-linux-multidistro:
+    name: Test (Linux Distros)
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-musl
-          - os: macos-latest
-            target: x86_64-apple-darwin
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-
-    name: Build (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-
+          - distro: arch
+            image: archlinux:latest
+          - distro: fedora
+            image: fedora:latest
+    container:
+      image: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Add target
-        run: rustup target add ${{ matrix.target }}
-
+      - name: Install Rust
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
       - name: Build
-        run: cargo build --release --target ${{ matrix.target }}
-
+        run: cargo build --release
       - name: Run tests
-        run: cargo test --release --target ${{ matrix.target }}
+        run: cargo test --release
+
+  test-macos:
+    name: Test (macOS)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add targets
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Build (x86_64)
+        run: cargo build --release --target x86_64-apple-darwin
+      - name: Run tests
+        run: cargo test --release --target x86_64-apple-darwin
+
+  test-windows:
+    name: Test (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add targets
+        run: rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Build
+        run: cargo build --release --target x86_64-pc-windows-msvc
+      - name: Run tests
+        run: cargo test --release --target x86_64-pc-windows-msvc

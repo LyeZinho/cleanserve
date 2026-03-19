@@ -1,5 +1,6 @@
 use crate::{CleanServeError, Result};
 use std::path::PathBuf;
+use tokio::process::Command;
 use tracing::info;
 
 pub struct PhpDownloader {
