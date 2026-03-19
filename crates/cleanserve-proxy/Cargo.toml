@@ -19,3 +19,7 @@ mime_guess = "2"
 
 [dev-dependencies]
 tokio-test = "0.4"
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"

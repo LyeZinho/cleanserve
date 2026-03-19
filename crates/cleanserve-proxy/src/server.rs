@@ -1,3 +1,4 @@
+use cleanserve_core::RateLimiter;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -77,6 +78,7 @@ pub struct ProxyServer {
     port: u16,
     root: Arc<String>,
     hmr_state: Arc<RwLock<HmrState>>,
+    rate_limiter: Arc<RateLimiter>,
 }
 
 impl ProxyServer {
@@ -85,6 +87,7 @@ impl ProxyServer {
             port,
             root: Arc::new(root),
             hmr_state: Arc::new(RwLock::new(HmrState::new())),
+            rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
         }
     }
 
@@ -95,16 +98,18 @@ impl ProxyServer {
 
         loop {
             match listener.accept().await {
-                Ok((stream, _)) => {
+                Ok((stream, remote_addr)) => {
                     let io = TokioIo::new(stream);
                     let root = Arc::clone(&self.root);
                     let hmr_state = Arc::clone(&self.hmr_state);
+                    let rate_limiter = Arc::clone(&self.rate_limiter);
                     
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
                             let root = Arc::clone(&root);
                             let hmr_state = Arc::clone(&hmr_state);
-                            handle_request(req, root, hmr_state)
+                            let rate_limiter = Arc::clone(&rate_limiter);
+                            handle_request(req, root, hmr_state, rate_limiter, remote_addr)
                         });
                         if let Err(e) = http1::Builder::new()
                             .serve_connection(io, service)
@@ -169,7 +174,23 @@ async fn handle_request(
     req: Request<hyper::body::Incoming>,
     root: Arc<String>,
     _hmr_state: Arc<RwLock<HmrState>>,
+    rate_limiter: Arc<RateLimiter>,
+    remote_addr: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    let ip = remote_addr.ip();
+    let is_localhost = ip.is_loopback();
+
+    if !is_localhost && !rate_limiter.is_allowed(&ip.to_string()).await {
+        warn!("Rate limit exceeded for IP: {}", ip);
+        return Ok(Response::builder()
+            .status(StatusCode::TOO_MANY_REQUESTS)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(
+                r#"{"error":"rate_limit_exceeded","message":"Too many requests"}"#,
+            )))
+            .expect("valid 429 response"));
+    }
+
     let path = req.uri().path();
     let method = req.method();
 
