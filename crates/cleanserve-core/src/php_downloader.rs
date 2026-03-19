@@ -1,6 +1,5 @@
 use crate::{CleanServeError, Result};
 use std::path::PathBuf;
-use tokio::process::Command;
 use tracing::info;
 
 pub struct PhpDownloader {
@@ -104,6 +103,7 @@ impl PhpDownloader {
     #[cfg(not(windows))]
     pub async fn download(&self, version: &str) -> Result<()> {
         use std::io::Write;
+        use tokio::process::Command;
         
         let install_path = self.get_install_path(version);
         
@@ -146,6 +146,7 @@ impl PhpDownloader {
         let output = Command::new("tar")
             .args(["-xzf", temp_tarball.to_str().unwrap(), "-C", install_path.to_str().unwrap(), "--strip-components=1"])
             .output()
+            .await
             .map_err(|e| CleanServeError::Download(format!("Failed to extract: {}", e)))?;
         
         if !output.status.success() {

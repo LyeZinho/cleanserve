@@ -34,6 +34,13 @@ jobs:
       image: ${{ matrix.image }}
     steps:
       - uses: actions/checkout@v4
+      - name: Install build tools
+        run: |
+          if [ "${{ matrix.distro }}" = "arch" ]; then
+            pacman -Sy --noconfirm base-devel
+          elif [ "${{ matrix.distro }}" = "fedora" ]; then
+            dnf install -y gcc
+          fi
       - name: Install Rust
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
