@@ -86,7 +86,7 @@ if ! ${DOWNLOAD_CMD} "${DOWNLOAD_URL}" > "${TMP_DIR}/${FILE_NAME}"; then
 fi
 
 info "Extracting..."
-${EXTRACT} "${TMP_DIR}/${FILE_NAME}" -d "${TMP_DIR}"
+${EXTRACT} -C "${TMP_DIR}" "${TMP_DIR}/${FILE_NAME}"
 
 # Handle .exe on Windows
 if [ "${OS_NAME}" = "windows" ]; then
