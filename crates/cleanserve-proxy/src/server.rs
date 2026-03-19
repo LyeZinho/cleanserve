@@ -51,7 +51,8 @@ impl Default for HmrState {
 
 const HMR_CLIENT_SCRIPT: &str = r#"
 (function() {
-    const ws = new WebSocket('ws://' + location.host + '/__cleanserve_hmr');
+    const wsPort = parseInt(location.port || '80') + 1;
+    const ws = new WebSocket('ws://' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'reload') {
@@ -72,6 +73,9 @@ const HMR_CLIENT_SCRIPT: &str = r#"
         console.log('[CleanServe] HMR disconnected, reconnecting...');
         setTimeout(() => location.reload(), 3000);
     };
+    ws.onopen = () => {
+        console.log('[CleanServe] HMR connected on port ' + wsPort);
+    };
 })();
 "#;
 
@@ -90,6 +94,18 @@ impl ProxyServer {
             port,
             root: Arc::new(root),
             hmr_state: Arc::new(RwLock::new(HmrState::new())),
+            rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
+            request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
+            slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
+        }
+    }
+
+    /// Create proxy with shared HMR state (for hot reload integration)
+    pub fn new_with_hmr(port: u16, root: String, hmr_state: Arc<RwLock<HmrState>>) -> Self {
+        Self {
+            port,
+            root: Arc::new(root),
+            hmr_state,
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
@@ -148,34 +164,60 @@ impl ProxyServer {
             if let Ok((stream, _)) = listener.accept().await {
                 let hmr_state = Arc::clone(&hmr_state);
                 tokio::spawn(async move {
-                    match accept_async(stream).await {
-                        Ok(ws_stream) => {
-                            let (mut write, _read) = ws_stream.split();
-                            let rx = {
-                                let state = hmr_state.read().await;
-                                state.subscribe()
-                            };
-                            let ack = Message::Text("{\"type\":\"connected\"}".into());
-                            let _ = write.send(ack).await;
-                            
-                            tokio::spawn(async move {
-                                let mut rx = rx;
-                                while let Ok(event) = rx.recv().await {
-                                    let msg: String = match event {
-                                        HmrEvent::PhpReload => r#"{"type":"reload"}"#.to_string(),
-                                        HmrEvent::StyleReload(path) => format!(r#"{{"type":"style","path":"{}"}}"#, path),
-                                    };
-                                    if write.send(Message::Text(msg.into())).await.is_err() {
-                                        break;
-                                    }
-                                }
-                            });
-                        }
-                        Err(e) => {
-                            warn!("WebSocket handshake failed: {}", e);
+                    Self::handle_ws_connection(stream, hmr_state).await;
+                });
+            }
+        }
+    }
+
+    /// Static HMR server that accepts external HmrState
+    pub async fn start_hmr_server_static(
+        ws_port: u16,
+        hmr_state: Arc<RwLock<HmrState>>,
+    ) -> anyhow::Result<()> {
+        let addr = SocketAddr::from(([127, 0, 0, 1], ws_port));
+        let listener = TcpListener::bind(addr).await?;
+        info!("🔌 HMR WebSocket server on ws://{}", addr);
+
+        loop {
+            if let Ok((stream, _)) = listener.accept().await {
+                let hmr_state = Arc::clone(&hmr_state);
+                tokio::spawn(async move {
+                    Self::handle_ws_connection(stream, hmr_state).await;
+                });
+            }
+        }
+    }
+
+    async fn handle_ws_connection(
+        stream: tokio::net::TcpStream,
+        hmr_state: Arc<RwLock<HmrState>>,
+    ) {
+        match accept_async(stream).await {
+            Ok(ws_stream) => {
+                let (mut write, _read) = ws_stream.split();
+                let rx = {
+                    let state = hmr_state.read().await;
+                    state.subscribe()
+                };
+                let ack = Message::Text("{\"type\":\"connected\"}".into());
+                let _ = write.send(ack).await;
+
+                tokio::spawn(async move {
+                    let mut rx = rx;
+                    while let Ok(event) = rx.recv().await {
+                        let msg: String = match event {
+                            HmrEvent::PhpReload => r#"{"type":"reload"}"#.to_string(),
+                            HmrEvent::StyleReload(path) => format!(r#"{{"type":"style","path":"{}"}}"#, path),
+                        };
+                        if write.send(Message::Text(msg.into())).await.is_err() {
+                            break;
                         }
                     }
                 });
+            }
+            Err(e) => {
+                warn!("WebSocket handshake failed: {}", e);
             }
         }
     }
@@ -424,5 +466,21 @@ async fn forward_to_php_worker(
         builder = builder.header(key, value);
     }
 
-    Ok(builder.body(Full::new(resp_body))?)
+    // Inject HMR script into HTML responses from PHP
+    let content_type = resp_headers
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    let final_body = if content_type.contains("text/html") {
+        if let Ok(html) = String::from_utf8(resp_body.to_vec()) {
+            Bytes::from(inject_hmr_script(&html))
+        } else {
+            resp_body
+        }
+    } else {
+        resp_body
+    };
+
+    Ok(builder.body(Full::new(final_body))?)
 }

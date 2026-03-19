@@ -1,9 +1,11 @@
 use anyhow::Context;
 use cleanserve_core::PhpDownloader;
 use cleanserve_core::PhpWorker;
-use cleanserve_proxy::ProxyServer;
+use cleanserve_proxy::{ProxyServer, HmrEvent, HmrState};
 use cleanserve_watcher::{FileWatcher, FileEvent};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use tracing::{info, error};
 
 pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
@@ -47,6 +49,9 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
 
     println!("✅ PHP ready: {}", php_path.display());
 
+    // Create shared HMR state for event broadcasting
+    let hmr_state = Arc::new(RwLock::new(HmrState::new()));
+
     // Start PHP worker
     let php_root = Path::new(&root).canonicalize()
         .unwrap_or_else(|_| PathBuf::from(&root));
@@ -54,8 +59,8 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     php_worker.start().context("Failed to start PHP worker")?;
     println!("✅ PHP worker running on port 9000");
 
-    // Create proxy server
-    let proxy = ProxyServer::new(port, root.clone());
+    // Create proxy server with shared HMR state
+    let proxy = ProxyServer::new_with_hmr(port, root.clone(), hmr_state.clone());
 
     // Start proxy server in background
     let proxy_handle = tokio::spawn(async move {
@@ -64,10 +69,9 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
 
     // Start HMR WebSocket server on port+1
     let hmr_port = port + 1;
-    let root2 = root.clone();
+    let hmr_state2 = hmr_state.clone();
     let hmr_handle = tokio::spawn(async move {
-        let hmr = ProxyServer::new(hmr_port, root2);
-        hmr.start_hmr_server(hmr_port).await
+        ProxyServer::start_hmr_server_static(hmr_port, hmr_state2).await
     });
 
     println!("🌐 Server running at http://localhost:{}", port);
@@ -80,6 +84,7 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     // Start file watcher if hot reload is enabled
     if hot_reload {
         let watcher = FileWatcher::new(&root);
+        let hmr = hmr_state.clone();
         match watcher.watch() {
             Ok(mut rx) => {
                 info!("👀 File watcher started");
@@ -88,9 +93,15 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
                         match event {
                             FileEvent::PhpChanged(paths) => {
                                 info!("📦 PHP files changed: {:?}", paths);
+                                let state = hmr.read().await;
+                                state.emit(HmrEvent::PhpReload);
                             }
                             FileEvent::StyleChanged(paths) => {
                                 info!("🎨 Style files changed: {:?}", paths);
+                                let state = hmr.read().await;
+                                for path in paths {
+                                    state.emit(HmrEvent::StyleReload(path.to_string_lossy().to_string()));
+                                }
                             }
                         }
                     }
