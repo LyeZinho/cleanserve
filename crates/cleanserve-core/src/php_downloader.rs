@@ -1,26 +1,26 @@
 use crate::{CleanServeError, Result};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::info;
 
 pub struct PhpDownloader {
-    cache_dir: PathBuf,
+    base_dir: PathBuf,
 }
 
 impl PhpDownloader {
-    pub fn new() -> Result<Self> {
-        let cache_dir = dirs::home_dir()
-            .ok_or_else(|| CleanServeError::Config("Cannot find home directory".into()))?
-            .join(".cleanserve")
-            .join("bin");
-        
-        std::fs::create_dir_all(&cache_dir)?;
-        
-        Ok(Self { cache_dir })
+    /// Create a new downloader with project-local base directory
+    /// PHP will be stored at: base_dir/php-{version}/
+    pub fn new(base_dir: &Path) -> Result<Self> {
+        std::fs::create_dir_all(base_dir)
+            .map_err(|e| CleanServeError::Config(format!("Cannot create PHP directory: {}", e)))?;
+
+        Ok(Self {
+            base_dir: base_dir.to_path_buf(),
+        })
     }
 
     /// Get the install path for a PHP version
     pub fn get_install_path(&self, version: &str) -> PathBuf {
-        self.cache_dir.join(format!("php-{}", version))
+        self.base_dir.join(format!("php-{}", version))
     }
 
     /// Check if PHP is already installed
