@@ -1,4 +1,4 @@
-use cleanserve_core::RateLimiter;
+use cleanserve_core::{RateLimiter, RequestValidator};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -6,6 +6,7 @@ use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::net::SocketAddr;
@@ -79,6 +80,7 @@ pub struct ProxyServer {
     root: Arc<String>,
     hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
+    request_validator: Arc<RequestValidator>,
 }
 
 impl ProxyServer {
@@ -88,6 +90,7 @@ impl ProxyServer {
             root: Arc::new(root),
             hmr_state: Arc::new(RwLock::new(HmrState::new())),
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
+            request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
         }
     }
 
@@ -103,13 +106,15 @@ impl ProxyServer {
                     let root = Arc::clone(&self.root);
                     let hmr_state = Arc::clone(&self.hmr_state);
                     let rate_limiter = Arc::clone(&self.rate_limiter);
+                    let request_validator = Arc::clone(&self.request_validator);
                     
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
                             let root = Arc::clone(&root);
                             let hmr_state = Arc::clone(&hmr_state);
                             let rate_limiter = Arc::clone(&rate_limiter);
-                            handle_request(req, root, hmr_state, rate_limiter, remote_addr)
+                            let request_validator = Arc::clone(&request_validator);
+                            handle_request(req, root, hmr_state, rate_limiter, request_validator, remote_addr)
                         });
                         if let Err(e) = http1::Builder::new()
                             .serve_connection(io, service)
@@ -175,6 +180,7 @@ async fn handle_request(
     root: Arc<String>,
     _hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
+    request_validator: Arc<RequestValidator>,
     remote_addr: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let ip = remote_addr.ip();
@@ -189,6 +195,46 @@ async fn handle_request(
                 r#"{"error":"rate_limit_exceeded","message":"Too many requests"}"#,
             )))
             .expect("valid 429 response"));
+    }
+
+    let mut header_map: HashMap<String, String> = HashMap::new();
+    for (k, v) in req.headers() {
+        if let Ok(val) = v.to_str() {
+            header_map.insert(k.as_str().to_lowercase(), val.to_string());
+        }
+    }
+
+    if let Err(msg) = request_validator.validate_content_length(&header_map) {
+        warn!("Request validation failed: {}", msg);
+        return Ok(Response::builder()
+            .status(StatusCode::PAYLOAD_TOO_LARGE)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(
+                format!(r#"{{"error":"payload_too_large","message":"{}"}}"#, msg),
+            )))
+            .expect("valid 413 response"));
+    }
+
+    if let Err(msg) = request_validator.validate_content_type(req.method().as_str(), &header_map) {
+        warn!("Request validation failed: {}", msg);
+        return Ok(Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(
+                format!(r#"{{"error":"bad_request","message":"{}"}}"#, msg),
+            )))
+            .expect("valid 400 response"));
+    }
+
+    if let Err(msg) = request_validator.validate_header_size(&header_map) {
+        warn!("Request validation failed: {}", msg);
+        return Ok(Response::builder()
+            .status(StatusCode::REQUEST_HEADER_FIELDS_TOO_LARGE)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(
+                format!(r#"{{"error":"header_too_large","message":"{}"}}"#, msg),
+            )))
+            .expect("valid 431 response"));
     }
 
     let path = req.uri().path();
