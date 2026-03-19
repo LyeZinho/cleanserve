@@ -1,0 +1,14 @@
+{
+  "name": "cleanserve",
+  "engine": {
+    "php": "8.4",
+    "extensions": [],
+    "display_errors": true,
+    "memory_limit": null
+  },
+  "server": {
+    "root": "public/",
+    "port": 8080,
+    "hot_reload": true
+  }
+}

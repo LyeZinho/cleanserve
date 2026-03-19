@@ -1,0 +1,1 @@
+C:\Users\Pedro\ Jesus\Downloads\cleanserve\target\release\libcleanserve_watcher.rlib: C:\Users\Pedro\ Jesus\Downloads\cleanserve\crates\cleanserve-watcher\src\lib.rs C:\Users\Pedro\ Jesus\Downloads\cleanserve\crates\cleanserve-watcher\src\watcher.rs

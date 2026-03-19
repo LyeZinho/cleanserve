@@ -1,0 +1,11 @@
+[package]
+name = "cleanserve-watcher"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+notify = { version = "6", default-features = false, features = ["macos_kqueue"] }
+notify-debouncer-mini = "0.4"
+tokio = { workspace = true }
+anyhow = { workspace = true }
+tracing = "0.1"

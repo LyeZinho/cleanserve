@@ -1,0 +1,20 @@
+[package]
+name = "cleanserve-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cleanserve-shared = { path = "../cleanserve-shared" }
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+reqwest.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+dirs = "5"
+zip = "2"
+
+# SSL and worker dependencies
+rcgen = "0.11"
+time = "0.3"
+tracing = "0.1"

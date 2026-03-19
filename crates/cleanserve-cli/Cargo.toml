@@ -1,0 +1,20 @@
+[package]
+name = "cleanserve-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "cleanserve"
+path = "src/main.rs"
+
+[dependencies]
+cleanserve-shared = { path = "../cleanserve-shared" }
+cleanserve-core = { path = "../cleanserve-core" }
+cleanserve-proxy = { path = "../cleanserve-proxy" }
+cleanserve-watcher = { path = "../cleanserve-watcher" }
+clap.workspace = true
+tokio.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+dirs = "5"

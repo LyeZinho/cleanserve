@@ -1,0 +1,21 @@
+[package]
+name = "cleanserve-proxy"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cleanserve-shared = { path = "../cleanserve-shared" }
+cleanserve-core = { path = "../cleanserve-core" }
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "server"] }
+http-body-util = "0.1"
+tokio = { workspace = true, features = ["fs", "sync"] }
+tokio-tungstenite = "0.26"
+anyhow = { workspace = true }
+tracing = "0.1"
+futures-util = "0.3"
+bytes = "1"
+mime_guess = "2"
+
+[dev-dependencies]
+tokio-test = "0.4"

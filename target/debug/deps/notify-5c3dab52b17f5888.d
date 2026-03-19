@@ -1,0 +1,11 @@
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\debug\deps\notify-5c3dab52b17f5888.d: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\lib.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\windows.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\event.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\null.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\poll.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\config.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\error.rs
+
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\debug\deps\libnotify-5c3dab52b17f5888.rmeta: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\lib.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\windows.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\event.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\null.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\poll.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\config.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\error.rs
+
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\lib.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\windows.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\event.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\null.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\poll.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\config.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\notify-6.1.1\src\error.rs:

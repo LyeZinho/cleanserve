@@ -1,0 +1,7 @@
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\release\deps\untrusted-b154bf5dc08ff0a8.d: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.7.1\src\untrusted.rs
+
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\release\deps\libuntrusted-b154bf5dc08ff0a8.rlib: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.7.1\src\untrusted.rs
+
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\release\deps\libuntrusted-b154bf5dc08ff0a8.rmeta: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.7.1\src\untrusted.rs
+
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\untrusted-0.7.1\src\untrusted.rs:

@@ -1,0 +1,10 @@
+[package]
+name = "cleanserve-shared"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+reqwest.workspace = true

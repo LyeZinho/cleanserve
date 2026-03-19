@@ -1,0 +1,11 @@
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\debug\deps\bzip2-7921c421b6b2d144.d: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\lib.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\mem.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\bufread.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\read.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\write.rs
+
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\debug\deps\libbzip2-7921c421b6b2d144.rlib: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\lib.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\mem.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\bufread.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\read.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\write.rs
+
+C:\Users\Pedro Jesus\Downloads\cleanserve\target\debug\deps\libbzip2-7921c421b6b2d144.rmeta: C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\lib.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\mem.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\bufread.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\read.rs C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\write.rs
+
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\lib.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\mem.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\bufread.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\read.rs:
+C:\Users\Pedro\ Jesus\.cargo\registry\src\index.crates.io-1949cf8c6b5b557f\bzip2-0.5.2\src\write.rs:
