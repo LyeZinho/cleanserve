@@ -52,7 +52,7 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         .unwrap_or_else(|_| PathBuf::from(&root));
     let mut php_worker = PhpWorker::new(php_path, php_root);
     php_worker.start().context("Failed to start PHP worker")?;
-    info!("✅ PHP worker running on port 9000");
+    println!("✅ PHP worker running on port 9000");
 
     // Create proxy server
     let proxy = ProxyServer::new(port, root.clone());
@@ -62,11 +62,12 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         proxy.start().await
     });
 
-    // Start HMR WebSocket server
+    // Start HMR WebSocket server on port+1
     let hmr_port = port + 1;
-    let proxy2 = ProxyServer::new(port, root.clone());
+    let root2 = root.clone();
     let hmr_handle = tokio::spawn(async move {
-        proxy2.start_hmr_server(hmr_port).await
+        let hmr = ProxyServer::new(hmr_port, root2);
+        hmr.start_hmr_server(hmr_port).await
     });
 
     println!("🌐 Server running at http://localhost:{}", port);
