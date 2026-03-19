@@ -109,7 +109,6 @@ __HALT_COMPILER();
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_stub_generation() {

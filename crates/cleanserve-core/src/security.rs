@@ -262,7 +262,7 @@ mod tests {
 
     #[test]
     fn test_rate_limiter() {
-        let limiter = RateLimiter::new(3, 60);
+        let _limiter = RateLimiter::new(3, 60);
         
         // Should allow first 3 requests
         // Can't easily test async here without tokio::test

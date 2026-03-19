@@ -55,12 +55,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Add targets
-        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
-      - name: Build (x86_64)
-        run: cargo build --release --target x86_64-apple-darwin
+      - name: Build
+        run: cargo build --release
       - name: Run tests
-        run: cargo test --release --target x86_64-apple-darwin
+        run: cargo test --release
 
   test-windows:
     name: Test (Windows)

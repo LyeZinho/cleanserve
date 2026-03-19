@@ -312,7 +312,6 @@ pub fn ensure_writable_dirs(info: &FrameworkInfo) -> Vec<std::io::Result<()>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn test_framework_display() {

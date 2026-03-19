@@ -188,14 +188,13 @@ impl Default for BundleBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
 
     #[test]
     fn test_manifest_generation() {
-        let dir = TempDir::new().unwrap();
-        let backend = MemoryBackend::new();
+        let dir = tempfile::TempDir::new().unwrap();
+        let _backend = MemoryBackend::new();
 
-        let mut builder = BundleBuilder::new(dir.path(), dir.path());
+        let builder = BundleBuilder::new(dir.path(), dir.path());
         builder
             .memory_backend
             .insert("index.php", b"<?php".to_vec());
