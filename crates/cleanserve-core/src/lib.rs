@@ -14,6 +14,7 @@ pub mod framework;
 pub mod error_overlay;
 pub mod static_blacklist;
 pub mod path_traversal;
+pub mod slowloris;
 
 pub use cleanserve_shared::{CleanServeError, Result};
 pub use config::{CleanServeConfig, EngineConfig, ServerConfig};
@@ -32,3 +33,4 @@ pub use framework::{Framework, FrameworkInfo, ensure_writable_dirs};
 pub use error_overlay::{PhpError, StackFrame, parse_php_error, vscode_link, jetbrains_link, phpstorm_link_legacy, inject_error_overlay};
 pub use static_blacklist::StaticBlacklist;
 pub use path_traversal::PathTraversal;
+pub use slowloris::SlowlorisProtection;

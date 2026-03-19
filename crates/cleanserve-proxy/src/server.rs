@@ -1,4 +1,4 @@
-use cleanserve_core::{RateLimiter, RequestValidator, StaticBlacklist, PathTraversal};
+use cleanserve_core::{RateLimiter, RequestValidator, StaticBlacklist, PathTraversal, SlowlorisProtection};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -81,6 +81,7 @@ pub struct ProxyServer {
     hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
     request_validator: Arc<RequestValidator>,
+    slowloris_protection: Arc<SlowlorisProtection>,
 }
 
 impl ProxyServer {
@@ -91,6 +92,7 @@ impl ProxyServer {
             hmr_state: Arc::new(RwLock::new(HmrState::new())),
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
+            slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
         }
     }
 
@@ -107,6 +109,9 @@ impl ProxyServer {
                     let hmr_state = Arc::clone(&self.hmr_state);
                     let rate_limiter = Arc::clone(&self.rate_limiter);
                     let request_validator = Arc::clone(&self.request_validator);
+                    let slowloris_protection = Arc::clone(&self.slowloris_protection);
+                    
+                    slowloris_protection.register_connection(remote_addr);
                     
                     tokio::spawn(async move {
                         let service = service_fn(move |req| {
@@ -114,7 +119,8 @@ impl ProxyServer {
                             let hmr_state = Arc::clone(&hmr_state);
                             let rate_limiter = Arc::clone(&rate_limiter);
                             let request_validator = Arc::clone(&request_validator);
-                            handle_request(req, root, hmr_state, rate_limiter, request_validator, remote_addr)
+                            let slowloris_protection = Arc::clone(&slowloris_protection);
+                            handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr)
                         });
                         if let Err(e) = http1::Builder::new()
                             .serve_connection(io, service)
@@ -181,13 +187,27 @@ async fn handle_request(
     _hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
     request_validator: Arc<RequestValidator>,
+    slowloris_protection: Arc<SlowlorisProtection>,
     remote_addr: SocketAddr,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let ip = remote_addr.ip();
     let is_localhost = ip.is_loopback();
 
+    if !slowloris_protection.is_connection_valid(remote_addr) {
+        warn!("Slowloris attack detected - connection timeout: {}", remote_addr);
+        slowloris_protection.mark_request_complete(remote_addr);
+        return Ok(Response::builder()
+            .status(StatusCode::REQUEST_TIMEOUT)
+            .header("Content-Type", "application/json")
+            .body(Full::new(Bytes::from(
+                r#"{"error":"request_timeout","message":"Request headers timeout"}"#,
+            )))
+            .expect("valid 408 response"));
+    }
+
     if !is_localhost && !rate_limiter.is_allowed(&ip.to_string()).await {
         warn!("Rate limit exceeded for IP: {}", ip);
+        slowloris_protection.mark_request_complete(remote_addr);
         return Ok(Response::builder()
             .status(StatusCode::TOO_MANY_REQUESTS)
             .header("Content-Type", "application/json")
@@ -313,7 +333,9 @@ async fn handle_request(
             <p>Root: {}</p>
         </body>
         </html>
-    "#, root.as_str());
+     "#, root.as_str());
+    
+    slowloris_protection.mark_request_complete(remote_addr);
     
     Ok(Response::builder()
         .status(StatusCode::OK)
