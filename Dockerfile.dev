@@ -1,0 +1,33 @@
+# CleanServe - Development Dockerfile
+# For local development with hot reload
+
+FROM rust:1.77
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PHP for testing
+RUN apt-get update && apt-get install -y \
+    php-cli php-cgi php-mbstring php-xml php-curl php-zip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set up working directory
+WORKDIR /app
+
+# Copy binary (from local build)
+COPY target/x86_64-unknown-linux-gnu/release/cleanserve /usr/local/bin/
+
+# Make executable
+RUN chmod +x /usr/local/bin/cleanserve
+
+# Environment
+ENV CLEANSERVE_HOME=/root/.cleanserve
+ENV PATH="/usr/local/bin:${PATH}"
+
+# Run as current user (for volume mounts)
+USER root
+
+# Default command
+ENTRYPOINT ["cleanserve"]
+CMD ["up"]

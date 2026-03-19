@@ -1,0 +1,29 @@
+[package]
+name = "cleanserve-bundle"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+cleanserve-preload = { path = "../cleanserve-preload" }
+cleanserve-inliner = { path = "../cleanserve-inliner" }
+cleanserve-vfs = { path = "../cleanserve-vfs" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1"
+tar = "0.4"
+zip = "2"
+xz2 = "0.1"
+flate2 = "1"
+tracing = "0.1"
+thiserror = "1"
+anyhow = "1"
+dirs = "5"
+walkdir = "2"
+reqwest = { workspace = true, features = ["json", "stream"] }
+tokio = { workspace = true, features = ["full"] }
+rust-embed = "8"
+sha2 = "0.10"
+hex = "0.4"
+chrono = "0.4"
+
+[dev-dependencies]
+tempfile = "3"

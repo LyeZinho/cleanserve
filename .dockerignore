@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Build artifacts
+target/
+**/*.rs.bk
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Node (if any)
+node_modules/
+npm-debug.log
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Docs (reduce build context)
+docs/
+README.md
+*.md

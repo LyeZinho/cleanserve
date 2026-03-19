@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  # CleanServe PHP application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/app:rw
+    environment:
+      - CLEANSERVE_PORT=8080
+      - CLEANSERVE_ROOT=/app/public
+      - APP_ENV=production
+      - APP_DEBUG=false
+    depends_on:
+      - php-fpm
+    networks:
+      - cleanserve
+
+  # PHP-FPM for FastCGI
+  php-fpm:
+    image: php:8.4-fpm-alpine
+    volumes:
+      - .:/app:ro
+    environment:
+      - PHP_FPM_PM=dynamic
+      - PHP_FPM_PM_MAX_CHILDREN=4
+      - PHP_FPM_PM_START_SERVERS=2
+      - PHP_FPM_PM_MIN_SPARE_SERVERS=1
+      - PHP_FPM_PM_MAX_SPARE_SERVERS=3
+    networks:
+      - cleanserve
+
+  # Optional: MariaDB for Laravel/Symfony
+  db:
+    image: mariadb:11
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: app
+      MYSQL_USER: app
+      MYSQL_PASSWORD: app
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - cleanserve
+
+networks:
+  cleanserve:
+    driver: bridge
+
+volumes:
+  db_data:

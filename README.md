@@ -37,7 +37,7 @@ Setting up a modern PHP environment shouldn't require a PhD in `.conf` files. Cl
 Simply run the official installer (requires `curl` and `unzip`):
 
 ```bash
-curl -fsSL https://get.cleanserve.dev | sh
+curl -fsSL https://raw.githubusercontent.com/LyeZinho/cleanserve/main/install.sh | sh
 ```
 
 -----
@@ -101,6 +101,19 @@ The brain of your development environment:
 
 -----
 
+## 📚 Documentation
+
+Full documentation is available in the [`docs/`](docs/README.md) directory:
+
+  * [**Getting Started**](docs/getting-started/installation.md) - Installation, quick start, and configuration
+  * [**User Guide**](docs/guide/cli-commands.md) - CLI commands, PHP management, hot reload, framework support
+  * [**Architecture**](docs/architecture/overview.md) - Internal design, proxy, worker pool, FastCGI, VFS
+  * [**Security**](docs/security/overview.md) - Rate limiting, path traversal protection, request validation, TLS
+  * [**API Reference**](docs/api/configuration-reference.md) - Full configuration reference
+  * [**Contributing**](docs/contributing/development-setup.md) - Development setup and architecture guide
+
+-----
+
 ## ✅ Definition of Done (DoD)
 
 For a feature to be considered stable in CleanServe, it must:
@@ -114,7 +127,7 @@ For a feature to be considered stable in CleanServe, it must:
 
 ## 🤝 Contributing
 
-CleanServe is a community-focused project. Feel free to open Issues or submit Pull Requests.
+CleanServe is a community-focused project. Feel free to open Issues or submit Pull Requests. See the [Contributing Guide](docs/contributing/development-setup.md) for setup instructions.
 
 1.  Fork the project.
 2.  Create your Feature Branch (`git checkout -b feature/AmazingFeature`).

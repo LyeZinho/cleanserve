@@ -6,6 +6,10 @@ members = [
     "crates/cleanserve-cli",
     "crates/cleanserve-proxy",
     "crates/cleanserve-watcher",
+    "crates/cleanserve-preload",
+    "crates/cleanserve-inliner",
+    "crates/cleanserve-vfs",
+    "crates/cleanserve-bundle",
 ]
 
 [workspace.package]
@@ -24,3 +28,8 @@ clap = { version = "4", features = ["derive"] }
 reqwest = { version = "0.12", features = ["json", "stream"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+dotenvy = "0.15"
+walkdir = "2"
+regex = "1"
+chrono = "0.4"
+dirs = "5"
