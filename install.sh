@@ -56,8 +56,8 @@ _detect() {
 _detect
 
 case "${OS_NAME}" in
-  windows) EXTRACT="unzip -o" ;;
-  *)       EXTRACT="tar -xzf" ;;
+  windows) ARCHIVE_EXT="zip" ;;
+  *)       ARCHIVE_EXT="tar.gz" ;;
 esac
 
 info "Detected: ${OS_NAME} ${ARCH_NAME}"
@@ -71,13 +71,7 @@ else
 fi
 
 TMP_DIR="$(mktemp -d)"
-if [ "${OS_NAME}" = "windows" ]; then
-  EXT="zip"
-  FILE_NAME="${BINARY_NAME}-${OS_NAME}-${ARCH_NAME}.${EXT}"
-else
-  EXT="tar.gz"
-  FILE_NAME="${BINARY_NAME}-${OS_NAME}-${ARCH_NAME}.${EXT}"
-fi
+FILE_NAME="${BINARY_NAME}-${OS_NAME}-${ARCH_NAME}.${ARCHIVE_EXT}"
 DOWNLOAD_URL="${DOWNLOAD_URL_BASE}/${FILE_NAME}"
 
 info "Downloading ${BINARY_NAME}..."
@@ -86,7 +80,11 @@ if ! ${DOWNLOAD_CMD} "${DOWNLOAD_URL}" > "${TMP_DIR}/${FILE_NAME}"; then
 fi
 
 info "Extracting..."
-${EXTRACT} -C "${TMP_DIR}" "${TMP_DIR}/${FILE_NAME}"
+if [ "${OS_NAME}" = "windows" ]; then
+  unzip -o "${TMP_DIR}/${FILE_NAME}" -d "${TMP_DIR}"
+else
+  tar -xzf "${TMP_DIR}/${FILE_NAME}" -C "${TMP_DIR}"
+fi
 
 # Handle .exe on Windows
 if [ "${OS_NAME}" = "windows" ]; then
