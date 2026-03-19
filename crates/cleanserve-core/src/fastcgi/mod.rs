@@ -12,20 +12,27 @@ use tracing::{debug, error};
 
 /// FastCGI record types
 const FCGI_BEGIN_REQUEST: u8 = 1;
+#[allow(dead_code)]
 const FCGI_ABORT_REQUEST: u8 = 2;
 const FCGI_END_REQUEST: u8 = 3;
 const FCGI_PARAMS: u8 = 4;
 const FCGI_STDIN: u8 = 5;
 const FCGI_STDOUT: u8 = 6;
 const FCGI_STDERR: u8 = 7;
+#[allow(dead_code)]
 const FCGI_DATA: u8 = 8;
+#[allow(dead_code)]
 const FCGI_GET_VALUES: u8 = 9;
+#[allow(dead_code)]
 const FCGI_GET_VALUES_RESULT: u8 = 10;
+#[allow(dead_code)]
 const FCGI_UNKNOWN_TYPE: u8 = 11;
 
 /// FastCGI role constants
 const FCGI_RESPONDER: u16 = 1;
+#[allow(dead_code)]
 const FCGI_AUTHORIZER: u16 = 2;
+#[allow(dead_code)]
 const FCGI_FILTER: u16 = 3;
 
 /// FastCGI flags
@@ -272,9 +279,9 @@ impl FastCgiClient {
                 ));
             }
 
-            let version = header[0];
+            let _version = header[0];
             let record_type = header[1];
-            let request_id = ((header[2] as u16) << 8) | (header[3] as u16);
+            let _request_id = ((header[2] as u16) << 8) | (header[3] as u16);
             let content_length = ((header[4] as u16) << 8) | (header[5] as u16);
             let padding_length = header[6];
 
@@ -340,6 +347,7 @@ impl FastCgiClient {
     }
 
     /// Increment request ID (for multiplexed connections)
+    #[allow(dead_code)]
     fn next_request_id(&mut self) {
         self.request_id = self.request_id.wrapping_add(1);
     }
@@ -371,6 +379,7 @@ impl FastCgiResponse {
 /// Connection pool for FastCGI
 pub struct FastCgiPool {
     addr: String,
+    #[allow(dead_code)]
     max_connections: usize,
 }
 

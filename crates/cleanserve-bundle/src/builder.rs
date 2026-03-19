@@ -1,11 +1,10 @@
-use crate::config::{BundleConfig, CompressionType};
+use crate::config::BundleConfig;
 use crate::phar::{create_phar_from_directory, PharError};
 use cleanserve_inliner::{EnvParser, PhpGenerator};
 use cleanserve_preload::PreloadGenerator;
 use cleanserve_vfs::MemoryBackend;
 use sha2::{Digest, Sha256};
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use thiserror::Error;
 use walkdir::WalkDir;
 

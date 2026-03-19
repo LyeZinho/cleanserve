@@ -100,7 +100,7 @@ impl PathTraversal {
         full_path.push(&normalized);
 
         // Canonicalize root to absolute path
-        let root_path = PathBuf::from(root).canonicalize().ok()?;
+        let _root_path = PathBuf::from(root).canonicalize().ok()?;
 
         // Normalize full path without requiring it to exist
         let normalized_full = full_path.to_string_lossy().to_string().replace("\\", "/");

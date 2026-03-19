@@ -1,6 +1,6 @@
 use crate::composer::{ComposerError, ComposerJson};
 use regex::Regex;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use walkdir::WalkDir;
@@ -18,6 +18,7 @@ pub enum PreloadError {
 pub struct PreloadGenerator {
     project_root: PathBuf,
     composer: ComposerJson,
+    #[allow(dead_code)]
     entry_points: Vec<PathBuf>,
     exclude_patterns: Vec<Regex>,
 }

@@ -17,6 +17,7 @@ pub enum PharError {
 
 pub struct PharBuilder<W: Write + Seek> {
     writer: ZipWriter<W>,
+    #[allow(dead_code)]
     base_path: PathBuf,
     compression_method: zip::CompressionMethod,
 }
