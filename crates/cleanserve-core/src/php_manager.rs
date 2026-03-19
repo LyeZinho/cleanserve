@@ -35,16 +35,21 @@ impl PhpManager {
 
     pub fn get_path(&self, version: &str) -> Option<PathBuf> {
         let path = self.cache_dir.join(format!("php-{}", version));
-        #[cfg(windows)]
-        let exe = path.join("php.exe");
-        #[cfg(not(windows))]
-        let exe = path.join("bin").join("php");
+        // Check multiple possible locations for the PHP binary
+        let candidates = vec![
+            path.join("php"),             // static-php-cli direct
+            path.join("bin").join("php"), // standard layout
+        ];
 
-        if exe.exists() {
-            Some(exe)
-        } else {
-            None
+        #[cfg(windows)]
+        let candidates = vec![path.join("php.exe"), path.join("bin").join("php.exe")];
+
+        for exe in candidates {
+            if exe.exists() {
+                return Some(exe);
+            }
         }
+        None
     }
 
     pub fn is_installed(&self, version: &str) -> bool {

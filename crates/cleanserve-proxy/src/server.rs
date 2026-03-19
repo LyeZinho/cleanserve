@@ -295,27 +295,51 @@ async fn handle_request(
              .expect("valid 403 response"));
      }
 
-     if method == Method::GET {
+     if method == Method::GET || method == Method::POST {
         let file_path = PathBuf::from(root.as_str()).join(path);
-        
-        if file_path.starts_with(root.as_str()) && file_path.is_file() {
+
+        // Check if this is a PHP file - forward to PHP worker
+        if let Some(ext) = file_path.extension() {
+            if ext == "php" {
+                match forward_to_php_worker(req).await {
+                    Ok(response) => {
+                        slowloris_protection.mark_request_complete(remote_addr);
+                        return Ok(response);
+                    }
+                    Err(e) => {
+                        error!("PHP worker error: {}", e);
+                        return Ok(Response::builder()
+                            .status(StatusCode::INTERNAL_SERVER_ERROR)
+                            .header("Content-Type", "text/html")
+                            .body(Full::new(Bytes::from(format!(
+                                "<h1>PHP Error</h1><p>{}</p>",
+                                e
+                            ))))
+                            .expect("valid 500 response"));
+                    }
+                }
+            }
+        }
+
+        // Static file serving (only for GET)
+        if method == Method::GET && file_path.starts_with(root.as_str()) && file_path.is_file() {
             match tokio::fs::read(&file_path).await {
                 Ok(content) => {
                     let mime = mime_guess::from_path(&file_path)
                         .first_or_octet_stream()
                         .to_string();
-                    
+
                     let resp = Response::builder()
                         .status(StatusCode::OK)
                         .header("Content-Type", mime.as_str());
-                    
+
                     if mime.starts_with("text/html") {
                         if let Ok(body) = String::from_utf8(content.clone()) {
                             let injected = inject_hmr_script(&body);
                             return Ok(resp.body(Full::new(Bytes::from(injected))).unwrap());
                         }
                     }
-                    
+
                     return Ok(resp.body(Full::new(Bytes::from(content))).unwrap());
                 }
                 Err(_) => {}
@@ -351,4 +375,54 @@ fn inject_hmr_script(html: &str) -> String {
     } else {
         format!("{}{}", html, script_tag)
     }
+}
+
+/// Forward request to PHP built-in server on port 9000
+async fn forward_to_php_worker(
+    req: Request<hyper::body::Incoming>,
+) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error>> {
+    use http_body_util::BodyExt;
+    use hyper_util::client::legacy::Client;
+    use hyper_util::rt::TokioExecutor;
+
+    let method = req.method().clone();
+    let uri = req.uri().clone();
+    let headers = req.headers().clone();
+
+    // Build PHP worker URL
+    let php_url = format!("http://127.0.0.1:9000{}", uri);
+
+    // Collect request body
+    let body_bytes = req.into_body().collect().await?.to_bytes();
+
+    // Create client and forward request
+    let client = Client::builder(TokioExecutor::new()).build_http();
+
+    let mut php_req = hyper::Request::builder()
+        .method(method)
+        .uri(&php_url);
+
+    // Copy relevant headers
+    for (key, value) in headers.iter() {
+        if !key.as_str().starts_with("host") {
+            php_req = php_req.header(key, value);
+        }
+    }
+    php_req = php_req.header("Host", "127.0.0.1:9000");
+
+    let php_req = php_req.body(http_body_util::Full::new(body_bytes))?;
+
+    let php_resp = client.request(php_req).await?;
+
+    // Build response to return
+    let status = php_resp.status();
+    let resp_headers = php_resp.headers().clone();
+    let resp_body = php_resp.into_body().collect().await?.to_bytes();
+
+    let mut builder = Response::builder().status(status);
+    for (key, value) in resp_headers.iter() {
+        builder = builder.header(key, value);
+    }
+
+    Ok(builder.body(Full::new(resp_body))?)
 }

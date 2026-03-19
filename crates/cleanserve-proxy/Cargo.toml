@@ -6,8 +6,8 @@ edition.workspace = true
 [dependencies]
 cleanserve-shared = { path = "../cleanserve-shared" }
 cleanserve-core = { path = "../cleanserve-core" }
-hyper = { version = "1", features = ["server", "http1", "http2"] }
-hyper-util = { version = "0.1", features = ["tokio", "server"] }
+hyper = { version = "1", features = ["server", "client", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["tokio", "server", "client", "client-legacy"] }
 http-body-util = "0.1"
 tokio = { workspace = true, features = ["fs", "sync"] }
 tokio-tungstenite = "0.26"

@@ -23,3 +23,4 @@ byteorder = "1"
 tracing-subscriber.workspace = true
 hostname = "0.4"
 libc = "0.2"
+regex.workspace = true

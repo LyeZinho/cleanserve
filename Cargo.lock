@@ -319,6 +319,7 @@ dependencies = [
  "hostname",
  "libc",
  "rcgen",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",
