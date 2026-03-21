@@ -17,6 +17,7 @@ pub mod static_blacklist;
 pub mod path_traversal;
 pub mod slowloris;
 pub mod package_manager;
+pub mod auto_updater;
 
 pub use cleanserve_shared::{CleanServeError, Result};
 pub use config::{CleanServeConfig, EngineConfig, ServerConfig};
