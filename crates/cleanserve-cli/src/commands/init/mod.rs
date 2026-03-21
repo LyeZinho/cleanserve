@@ -25,6 +25,7 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
             memory_limit: None,
         },
         server: cleanserve_core::ServerConfig::default(),
+        packages: None,
     };
     
     config.save(config_path)

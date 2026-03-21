@@ -5,3 +5,4 @@ pub mod use_;
 pub mod list;
 pub mod update;
 pub mod composer;
+pub mod package;

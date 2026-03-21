@@ -57,6 +57,29 @@ pub enum Commands {
         #[arg(trailing_var_arg = true)]
         args: Vec<String>,
     },
+    /// Manage project packages (MySQL, Redis, phpMyAdmin, etc)
+    Package {
+        #[command(subcommand)]
+        action: PackageAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum PackageAction {
+    /// Add a package to the project
+    Add {
+        /// Package name (e.g., mysql, redis)
+        name: String,
+        /// Package version (optional, uses default if not specified)
+        version: Option<String>,
+    },
+    /// List available packages
+    List,
+    /// Show package information
+    Info {
+        /// Package name
+        name: String,
+    },
 }
 
 mod commands;
@@ -100,6 +123,23 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Composer { args } => {
             commands::composer::run(args).await?;
+        }
+        Commands::Package { action } => {
+            let project_root = std::env::current_dir()?;
+            match action {
+                PackageAction::Add { name, version } => {
+                    commands::package::PackageCommand::add(&name, version.as_deref(), &project_root).await
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+                PackageAction::List => {
+                    commands::package::PackageCommand::list()
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+                PackageAction::Info { name } => {
+                    commands::package::PackageCommand::info(&name)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+            }
         }
     }
     
