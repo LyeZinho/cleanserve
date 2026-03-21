@@ -32,6 +32,13 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
 
     println!("✓ Created cleanserve.json");
 
+    let cleanserve_dir = Path::new(".cleanserve");
+    let cleanserve_pages_dir = cleanserve_dir.join("pages");
+    std::fs::create_dir_all(&cleanserve_pages_dir)
+        .context("Failed to create .cleanserve/pages/ directory")?;
+    
+    println!("✓ Created .cleanserve/pages/ directory");
+
     let public_dir = Path::new("public");
     if !public_dir.exists() {
         std::fs::create_dir_all(public_dir)
@@ -39,10 +46,10 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
         
         // Generate HTML pages based on quickstart flag
         if quickstart {
-            html_pages::write_quickstart_pages(public_dir, &project_name)
+            html_pages::write_quickstart_pages(&cleanserve_pages_dir, &project_name)
                 .context("Failed to write quickstart pages")?;
         } else {
-            html_pages::write_default_pages(public_dir, &project_name, &php)
+            html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php)
                 .context("Failed to write default pages")?;
         }
         
