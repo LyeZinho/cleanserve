@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="400" height="400" viewBox="0 0 400 400" version="1.1" xmlns="http://www.w3.org/2000/svg">    
+    <defs>
+        <color id="azulFlat">#3498DB</color>
+    </defs>
+    
+    <g id="Logo" stroke="none" stroke-width="1" fill="none" fill-rule="evenodd">
+        <g id="Refresh-Icon" transform="translate(200, 200) rotate(-45) translate(-200, -200) translate(100, 100)">
+            
+            <path d="M200,100 C200,44.772 155.228,0 100,0 C44.772,0 0,44.772 0,100 C0,155.228 44.772,200 100,200 C129.524,200 156.191,187.619 175.238,167.619 L146.667,139.048 C134.762,152.143 118.333,160 100,160 C66.863,160 40,133.137 40,100 C40,66.863 66.863,40 100,40 C133.137,40 160,66.863 160,100 C160,111.429 156.191,121.905 149.762,130.476 L178.333,159.048 C191.905,142.857 200,122.381 200,100 Z" id="Spiral" fill="#3498DB" fill-rule="nonzero"></path>
+            
+            <polygon id="Arrow-Head" fill="#3498DB" fill-rule="nonzero" points="140 40 200 100 80 100"></polygon>
+
+        </g>
+    </g>
+</svg>
