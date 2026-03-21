@@ -39,6 +39,10 @@ impl HmrState {
     }
 
     pub fn emit(&self, event: HmrEvent) {
+        match &event {
+            HmrEvent::PhpReload => info!("📢 Broadcasting PHP reload event"),
+            HmrEvent::StyleReload(path) => info!("📢 Broadcasting style reload event: {}", path),
+        }
         let _ = self.tx.send(event);
     }
 }
@@ -202,19 +206,25 @@ impl ProxyServer {
                 };
                 let ack = Message::Text("{\"type\":\"connected\"}".into());
                 let _ = write.send(ack).await;
+                info!("✅ WebSocket client connected, listening for HMR events");
 
-                tokio::spawn(async move {
-                    let mut rx = rx;
-                    while let Ok(event) = rx.recv().await {
-                        let msg: String = match event {
-                            HmrEvent::PhpReload => r#"{"type":"reload"}"#.to_string(),
-                            HmrEvent::StyleReload(path) => format!(r#"{{"type":"style","path":"{}"}}"#, path),
-                        };
-                        if write.send(Message::Text(msg.into())).await.is_err() {
-                            break;
-                        }
+                let mut rx = rx;
+                while let Ok(event) = rx.recv().await {
+                    let msg: String = match event {
+                        HmrEvent::PhpReload => {
+                            info!("📤 Sending PHP reload to WebSocket client");
+                            r#"{"type":"reload"}"#.to_string()
+                        },
+                        HmrEvent::StyleReload(path) => {
+                            info!("📤 Sending style reload to WebSocket client: {}", path);
+                            format!(r#"{{"type":"style","path":"{}"}}"#, path)
+                        },
+                    };
+                    if write.send(Message::Text(msg.into())).await.is_err() {
+                        info!("⚠️  WebSocket send failed, client disconnected");
+                        break;
                     }
-                });
+                }
             }
             Err(e) => {
                 warn!("WebSocket handshake failed: {}", e);
