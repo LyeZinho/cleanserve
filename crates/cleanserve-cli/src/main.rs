@@ -80,6 +80,21 @@ pub enum PackageAction {
         /// Package name
         name: String,
     },
+    /// Start a package
+    Start {
+        /// Package name
+        name: String,
+    },
+    /// Stop a package
+    Stop {
+        /// Package name
+        name: String,
+    },
+    /// Show package status
+    Status {
+        /// Package name (optional, show all if not specified)
+        name: Option<String>,
+    },
 }
 
 mod commands;
@@ -137,6 +152,18 @@ async fn main() -> anyhow::Result<()> {
                 }
                 PackageAction::Info { name } => {
                     commands::package::PackageCommand::info(&name)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+                PackageAction::Start { name } => {
+                    commands::package::PackageCommand::start(&name)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+                PackageAction::Stop { name } => {
+                    commands::package::PackageCommand::stop(&name)
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                }
+                PackageAction::Status { name } => {
+                    commands::package::PackageCommand::status(name.as_deref())
                         .map_err(|e| anyhow::anyhow!(e))?;
                 }
             }

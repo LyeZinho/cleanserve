@@ -59,4 +59,23 @@ impl PackageCommand {
 
         Ok(())
     }
+
+    pub fn start(package_name: &str) -> Result<(), String> {
+        println!("✓ Starting package '{}' (placeholder - full implementation in Phase 4)", package_name);
+        Ok(())
+    }
+
+    pub fn stop(package_name: &str) -> Result<(), String> {
+        println!("✓ Stopped package '{}' (placeholder - full implementation in Phase 4)", package_name);
+        Ok(())
+    }
+
+     pub fn status(package_name: Option<&str>) -> Result<(), String> {
+        if let Some(name) = package_name {
+            println!("Status of package '{}': Running (placeholder)", name);
+        } else {
+            println!("All packages status (placeholder):");
+        }
+        Ok(())
+    }
 }
