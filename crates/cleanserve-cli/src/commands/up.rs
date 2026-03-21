@@ -81,12 +81,12 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     println!();
     println!("Press Ctrl+C to stop");
 
-    // Start file watcher if hot reload is enabled
-    if hot_reload {
+    // _watcher_guard MUST live until shutdown — dropping it kills the OS file watcher.
+    let _watcher_guard = if hot_reload {
         let watcher = FileWatcher::new(&root);
         let hmr = hmr_state.clone();
         match watcher.watch() {
-            Ok(mut rx) => {
+            Ok((mut rx, guard)) => {
                 info!("👀 File watcher started");
                 tokio::spawn(async move {
                     while let Some(event) = rx.recv().await {
@@ -106,12 +106,16 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
                         }
                     }
                 });
+                Some(guard)
             }
             Err(e) => {
                 info!("⚠️ File watcher failed to start: {}. Hot reload disabled.", e);
+                None
             }
         }
-    }
+    } else {
+        None
+    };
 
     // Wait for Ctrl+C or error
     tokio::select! {

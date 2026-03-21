@@ -17,9 +17,9 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
     }
     
     let config = cleanserve_core::CleanServeConfig {
-        name: project_name,
+        name: project_name.clone(),
         engine: cleanserve_core::EngineConfig {
-            php,
+            php: php.clone(),
             extensions: vec![],
             display_errors: true,
             memory_limit: None,
@@ -39,14 +39,14 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
         
         // Generate HTML pages based on quickstart flag
         if quickstart {
-            html_pages::write_quickstart_pages(public_dir)
+            html_pages::write_quickstart_pages(public_dir, &project_name)
                 .context("Failed to write quickstart pages")?;
         } else {
-            html_pages::write_default_pages(public_dir)
+            html_pages::write_default_pages(public_dir, &project_name, &php)
                 .context("Failed to write default pages")?;
         }
         
-        println!("✓ Created public/ directory with index.php");
+        println!("✓ Created public/ directory with HTML pages");
     }
 
     let gitignore_path = Path::new(".gitignore");

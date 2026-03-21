@@ -338,12 +338,36 @@ async fn handle_request(
      }
 
      if method == Method::GET || method == Method::POST {
-        let file_path = PathBuf::from(root.as_str()).join(path);
+        let mut request_path = path.to_string();
 
-        // Check if this is a PHP file - forward to PHP worker
+        if request_path == "/" || request_path.ends_with('/') {
+            let index_php = PathBuf::from(root.as_str()).join(request_path.trim_start_matches('/'));
+            let index_php = index_php.join("index.php");
+            if index_php.exists() {
+                request_path = if request_path == "/" {
+                    "/index.php".to_string()
+                } else {
+                    format!("{}index.php", request_path)
+                };
+            } else {
+                let index_html = PathBuf::from(root.as_str())
+                    .join(request_path.trim_start_matches('/'))
+                    .join("index.html");
+                if index_html.exists() {
+                    request_path = if request_path == "/" {
+                        "/index.html".to_string()
+                    } else {
+                        format!("{}index.html", request_path)
+                    };
+                }
+            }
+        }
+
+        let file_path = PathBuf::from(root.as_str()).join(request_path.trim_start_matches('/'));
+
         if let Some(ext) = file_path.extension() {
             if ext == "php" {
-                match forward_to_php_worker(req).await {
+                match forward_to_php_worker(req, &request_path).await {
                     Ok(response) => {
                         slowloris_protection.mark_request_complete(remote_addr);
                         return Ok(response);
@@ -389,24 +413,14 @@ async fn handle_request(
         }
     }
 
-    let html = format!(r#"
-        <!DOCTYPE html>
-        <html>
-        <head><title>CleanServe</title></head>
-        <body>
-            <h1>🚀 CleanServe Running</h1>
-            <p>PHP worker starting...</p>
-            <p>Root: {}</p>
-        </body>
-        </html>
-     "#, root.as_str());
-    
     slowloris_protection.mark_request_complete(remote_addr);
     
     Ok(Response::builder()
-        .status(StatusCode::OK)
+        .status(StatusCode::NOT_FOUND)
         .header("Content-Type", "text/html")
-        .body(Full::new(Bytes::from(html)))
+        .body(Full::new(Bytes::from(
+            "<h1>404 Not Found</h1><p>The requested resource was not found on this server.</p>",
+        )))
         .unwrap())
 }
 
@@ -422,17 +436,16 @@ fn inject_hmr_script(html: &str) -> String {
 /// Forward request to PHP built-in server on port 9000
 async fn forward_to_php_worker(
     req: Request<hyper::body::Incoming>,
+    rewritten_path: &str,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error>> {
     use http_body_util::BodyExt;
     use hyper_util::client::legacy::Client;
     use hyper_util::rt::TokioExecutor;
 
     let method = req.method().clone();
-    let uri = req.uri().clone();
     let headers = req.headers().clone();
 
-    // Build PHP worker URL
-    let php_url = format!("http://127.0.0.1:9000{}", uri);
+    let php_url = format!("http://127.0.0.1:9000{}", rewritten_path);
 
     // Collect request body
     let body_bytes = req.into_body().collect().await?.to_bytes();

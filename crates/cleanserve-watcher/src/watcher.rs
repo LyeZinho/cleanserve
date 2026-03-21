@@ -1,5 +1,5 @@
-use notify::RecursiveMode;
-use notify_debouncer_mini::{new_debouncer, DebouncedEventKind};
+use notify::{RecommendedWatcher, RecursiveMode};
+use notify_debouncer_mini::{new_debouncer, DebouncedEventKind, Debouncer};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -10,6 +10,9 @@ pub enum FileEvent {
     StyleChanged(Vec<PathBuf>),
 }
 
+/// Guard that keeps the file watcher alive. Drop this to stop watching.
+pub type WatcherGuard = Debouncer<RecommendedWatcher>;
+
 pub struct FileWatcher {
     root: PathBuf,
 }
@@ -19,12 +22,16 @@ impl FileWatcher {
         Self { root: root.into() }
     }
 
-    pub fn watch(&self) -> anyhow::Result<mpsc::Receiver<FileEvent>> {
+    /// Start watching for file changes.
+    ///
+    /// Returns both the event receiver AND the debouncer guard.
+    /// **The caller MUST hold onto the WatcherGuard** — dropping it stops the watcher.
+    pub fn watch(&self) -> anyhow::Result<(mpsc::Receiver<FileEvent>, WatcherGuard)> {
         let (tx, rx) = mpsc::channel(100);
         let root = self.root.clone();
 
         let mut debouncer = new_debouncer(
-            Duration::from_millis(100),
+            Duration::from_millis(300),
             move |res: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
                 if let Ok(events) = res {
                     let mut php_events = Vec::new();
@@ -57,6 +64,6 @@ impl FileWatcher {
         debouncer.watcher().watch(&root, RecursiveMode::Recursive)?;
         info!("👀 Watching {} for changes", root.display());
 
-        Ok(rx)
+        Ok((rx, debouncer))
     }
 }

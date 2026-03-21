@@ -1,3 +1,4 @@
+use anyhow::Context;
 use std::path::Path;
 
 /// Generate shared brutaliste CSS for all pages
@@ -216,38 +217,719 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>"##
 }
 
-pub fn write_default_pages(public_dir: &Path) -> anyhow::Result<()> {
-    let index_php = public_dir.join("index.php");
-    std::fs::write(
-        &index_php,
-        r#"<?php
-/**
- * CleanServe - Zero Config PHP Development Server
- * This is your application entry point.
- */
+/// Generate index.html for default (empty) project
+fn generate_default_index(project_name: &str, php_version: &str) -> String {
+    let css = generate_css();
+    let js = generate_js();
 
-echo "Hello from CleanServe!\n";
-phpinfo();
-"#,
-    )?;
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="CleanServe: Zero-Config PHP Development Server">
+  <title>{project_name} - CleanServe</title>
+  {css}
+</head>
+<body>
+  <header>
+    <nav style="display: flex; justify-content: space-between; align-items: center;">
+      <h1 style="margin: 0; font-size: 1.5rem;">🌀 {project_name}</h1>
+      <div style="font-size: 0.875rem; color: var(--text-secondary);">PHP {php_version}</div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="p-4">
+      <div class="glass-brutal">
+        <h2>Welcome to CleanServe</h2>
+        <p style="color: var(--text-secondary); margin: 1rem 0;">
+          Your zero-configuration PHP development server is running. 
+          <strong>Start building!</strong>
+        </p>
+
+        <div class="brutal-code mt-4">
+<pre>📂 public/
+   ├── index.php      ← Your app entry point
+   └── assets/        ← CSS, JS, images</pre>
+        </div>
+
+        <div class="mt-4">
+          <h3>Quick Start</h3>
+          <ol style="margin-left: 1.5rem; color: var(--text-secondary);">
+            <li>Edit <code style="background: var(--bg-darker); padding: 0.25rem 0.5rem;">public/index.php</code></li>
+            <li>Save the file (hot reload enabled)</li>
+            <li>Refresh your browser</li>
+          </ol>
+        </div>
+
+        <div class="mt-4">
+          <button class="brutal-btn" data-copy="cleanserve use 8.5">
+            Switch PHP Version →
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="p-4 mt-4">
+      <div class="grid grid-2">
+        <div class="brutal-card">
+          <h3 style="color: var(--accent);">🔄 Hot Reload</h3>
+          <p>Changes to .php files trigger instant reload. CSS updates without page refresh.</p>
+        </div>
+        <div class="brutal-card">
+          <h3 style="color: var(--accent);">🔐 Auto HTTPS</h3>
+          <p>Self-signed certificates generated automatically. Secure by default.</p>
+        </div>
+        <div class="brutal-card">
+          <h3 style="color: var(--accent);">📦 Portable PHP</h3>
+          <p>Ultra-lightweight PHP binaries (~4-5MB). Switch versions instantly.</p>
+        </div>
+        <div class="brutal-card">
+          <h3 style="color: var(--accent);">🎼 Composer Native</h3>
+          <p>Run Composer commands with your project's PHP version automatically.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="p-4 mt-4">
+      <div class="glass-brutal">
+        <h3>Next Steps</h3>
+        <ul style="margin-left: 1.5rem; color: var(--text-secondary); line-height: 2;">
+          <li><a href="https://github.com/LyeZinho/cleanserve">📖 Documentation</a></li>
+          <li><a href="https://github.com/LyeZinho/cleanserve/issues">🐛 Report Issues</a></li>
+          <li><a href="https://github.com/LyeZinho/cleanserve">⭐ Star on GitHub</a></li>
+        </ul>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p style="font-size: 0.875rem; color: var(--text-secondary);">
+      ⚡ Powered by <strong>CleanServe</strong> • Zero Config, Maximum Speed
+    </p>
+  </footer>
+
+  {js}
+</body>
+</html>"#
+    )
+}
+
+/// Generate 404.html error page
+fn generate_default_404() -> String {
+    let css = generate_css();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>404 - Not Found</title>
+  {css}
+</head>
+<body>
+  <header>
+    <h1 style="margin: 0; font-size: 1.5rem;">🌀 CleanServe</h1>
+  </header>
+
+  <main>
+    <section class="p-4" style="text-align: center; margin-top: 4rem;">
+      <div class="brutal-stat">
+        <div class="brutal-stat-value" style="font-size: 5rem;">404</div>
+        <div class="brutal-stat-label">NOT FOUND</div>
+      </div>
+
+      <div class="glass-brutal mt-4" style="max-width: 600px; margin: 2rem auto;">
+        <h2>Page Not Found</h2>
+        <p style="color: var(--text-secondary); margin: 1rem 0;">
+          The resource you're looking for doesn't exist. Check the URL and try again.
+        </p>
+        
+        <div class="brutal-code mt-4">
+<pre>GET /requested-path
+HTTP/1.1 404 Not Found</pre>
+        </div>
+
+        <div class="mt-4">
+          <a href="/" class="brutal-btn">← Back to Home</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p style="font-size: 0.875rem; color: var(--text-secondary);">
+      CleanServe • Zero Config PHP Server
+    </p>
+  </footer>
+</body>
+</html>"#
+    )
+}
+
+/// Generate error.html for PHP runtime errors
+fn generate_default_error() -> String {
+    let css = generate_css();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>⚠️ Runtime Error</title>
+  {css}
+</head>
+<body>
+  <header>
+    <h1 style="margin: 0; font-size: 1.5rem;">🌀 CleanServe</h1>
+  </header>
+
+  <main>
+    <section class="p-4" style="margin-top: 2rem;">
+      <div class="glass-brutal" style="border-left: 6px solid #ef4444; max-width: 800px; margin: 0 auto;">
+        <h2 style="color: #ef4444;">⚠️ PHP Runtime Error</h2>
+        <p style="color: var(--text-secondary); margin: 1rem 0;">
+          An error occurred while processing your request. Check the server logs for details.
+        </p>
+
+        <div class="brutal-code mt-4">
+<pre style="color: #fca5a5;">Please check:
+1. Your PHP code syntax
+2. File permissions
+3. Server logs in .cleanserve/
+4. Installed extensions</pre>
+        </div>
+
+        <div class="mt-4">
+          <p style="font-size: 0.875rem; color: var(--text-secondary);">
+            💡 <strong>Tip:</strong> Run <code style="background: var(--bg-darker); padding: 0.25rem 0.5rem;">cleanserve logs</code> to see detailed output.
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <p style="font-size: 0.875rem; color: var(--text-secondary);">
+      CleanServe • Zero Config PHP Server
+    </p>
+  </footer>
+</body>
+</html>"#
+    )
+}
+
+pub fn write_default_pages(
+    public_dir: &Path,
+    project_name: &str,
+    php_version: &str,
+) -> anyhow::Result<()> {
+    let index = generate_default_index(project_name, php_version);
+    std::fs::write(public_dir.join("index.html"), index)
+        .context("Failed to write public/index.html")?;
+
+    let not_found = generate_default_404();
+    std::fs::write(public_dir.join("404.html"), not_found)
+        .context("Failed to write public/404.html")?;
+
+    let error = generate_default_error();
+    std::fs::write(public_dir.join("error.html"), error)
+        .context("Failed to write public/error.html")?;
 
     Ok(())
 }
 
-pub fn write_quickstart_pages(public_dir: &Path) -> anyhow::Result<()> {
-    let index_php = public_dir.join("index.php");
-    std::fs::write(
-        &index_php,
-        r#"<?php
-/**
- * CleanServe - Zero Config PHP Development Server
- * This is your application entry point.
- */
+/// Generate quickstart index.html with hero, features, quick start, API routes
+fn generate_quickstart_index(project_name: &str) -> String {
+    let css = generate_css();
+    let js = generate_js();
 
-echo "Hello from CleanServe!\n";
-phpinfo();
-"#,
-    )?;
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CleanServe - Modern PHP Development</title>
+    {css}
+</head>
+<body>
+    <header>
+        <nav style="display: flex; justify-content: space-between; align-items: center; max-width: 1200px; margin: 0 auto;">
+            <a href="/" style="font-family: 'Space Grotesk', sans-serif; font-weight: 700; font-size: 1.5rem;">CleanServe</a>
+            <div style="display: flex; gap: 2rem;">
+                <a href="/#features">Features</a>
+                <a href="/#quick-start">Quick Start</a>
+                <a href="/docs.html">API</a>
+                <a href="/about.html">About</a>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <!-- Hero Section -->
+        <section style="background: linear-gradient(135deg, var(--accent) 0%, #059669 100%); color: var(--bg-dark); padding: 4rem 2rem; text-align: center; margin-bottom: 4rem; box-shadow: var(--shadow-brutal);">
+            <h1 style="color: var(--bg-dark); margin-bottom: 1rem;">Modern PHP Development</h1>
+            <p style="color: var(--bg-dark); font-size: 1.25rem; margin-bottom: 2rem;">Built with CleanServe • Zero Config • Maximum Speed</p>
+            <button class="brutal-btn" data-copy="cleanserve use 8.5" style="background: var(--bg-dark); color: var(--accent);">Copy PHP Command</button>
+        </section>
+
+        <!-- Features Section -->
+        <section id="features">
+            <h2 class="text-center" style="margin-bottom: 2rem;">Features</h2>
+            <div class="grid grid-3 mb-4">
+                <div class="brutal-card">
+                    <h3>🔄 Hot Reload</h3>
+                    <p>CSS updates without refresh, PHP restarts on save</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>🎼 Composer Ready</h3>
+                    <p>Native Composer support with version-specific PHP</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>🗂 Modern Structure</h3>
+                    <p>Organized public/, app/, config/ directories</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>🔐 Auto HTTPS</h3>
+                    <p>SSL certificates generated automatically</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>📦 Portable</h3>
+                    <p>Isolated PHP binaries, no system pollution</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>📝 Example Code</h3>
+                    <p>Ready-to-use API examples and patterns</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Quick Start Section -->
+        <section id="quick-start">
+            <h2 class="text-center" style="margin-bottom: 2rem;">Quick Start</h2>
+            <div style="max-width: 600px; margin: 0 auto;">
+                <div style="margin-bottom: 1.5rem;">
+                    <button class="brutal-btn" data-expand style="width: 100%; text-align: left; padding: 1rem;">▶ Step 1: Install Dependencies</button>
+                    <div style="display: none; background: var(--bg-card); border: 1px solid var(--border); padding: 1rem; margin-top: 0.5rem;">
+                        <pre class="brutal-code">composer install</pre>
+                    </div>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <button class="brutal-btn" data-expand style="width: 100%; text-align: left; padding: 1rem;">▶ Step 2: Start the Server</button>
+                    <div style="display: none; background: var(--bg-card); border: 1px solid var(--border); padding: 1rem; margin-top: 0.5rem;">
+                        <pre class="brutal-code">cleanserve up</pre>
+                    </div>
+                </div>
+                <div style="margin-bottom: 1.5rem;">
+                    <button class="brutal-btn" data-expand style="width: 100%; text-align: left; padding: 1rem;">▶ Step 3: View Example API</button>
+                    <div style="display: none; background: var(--bg-card); border: 1px solid var(--border); padding: 1rem; margin-top: 0.5rem;">
+                        <pre class="brutal-code">curl https://localhost:8080/api/example</pre>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- API Routes Section -->
+        <section style="margin-top: 4rem;">
+            <h2 class="text-center" style="margin-bottom: 2rem;">API Routes</h2>
+            <div class="grid grid-2">
+                <div class="brutal-card">
+                    <h3>GET /api/example</h3>
+                    <p>Example API endpoint returning JSON</p>
+                    <button class="brutal-btn" data-copy="curl -s https://localhost:8080/api/example" style="width: 100%; margin-top: 1rem;">Copy cURL</button>
+                </div>
+                <div class="brutal-card">
+                    <h3>GET /docs</h3>
+                    <p>API documentation and examples</p>
+                    <button class="brutal-btn" data-copy="open https://localhost:8080/docs.html" style="width: 100%; margin-top: 1rem;">View Docs</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA Section -->
+        <section style="text-align: center; margin-top: 4rem; padding: 2rem; background: var(--bg-card); border: 2px solid var(--border); box-shadow: var(--shadow-brutal);">
+            <h2>Ready to Build?</h2>
+            <p style="margin-bottom: 1.5rem;">Learn more about CleanServe and best practices</p>
+            <a href="/about.html" class="brutal-btn">View Documentation</a>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 {} • Built with CleanServe</p>
+    </footer>
+
+    {js}
+</body>
+</html>"#,
+        project_name
+    )
+}
+
+/// Generate quickstart about.html with documentation
+fn generate_quickstart_about() -> String {
+    let css = generate_css();
+    let js = generate_js();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📖 Documentation - CleanServe</title>
+    {css}
+</head>
+<body>
+    <header>
+        <div style="max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;">
+            <h1 style="margin: 0;">📖 Documentation</h1>
+            <a href="/" class="brutal-btn">← Back to Home</a>
+        </div>
+    </header>
+
+    <main>
+        <!-- Project Structure -->
+        <section>
+            <h2>Project Structure</h2>
+            <pre class="brutal-code">my-project/
+├── public/              # Web root
+│   ├── index.html      # Landing page
+│   └── api/            # API endpoints
+├── app/                # Application code
+├── config/             # Configuration files
+├── vendor/             # Composer dependencies
+├── composer.json       # Project manifest
+└── cleanserve.json     # CleanServe config</pre>
+        </section>
+
+        <!-- CleanServe Commands -->
+        <section>
+            <h2>CleanServe Commands</h2>
+            <div class="grid grid-2 mb-4">
+                <div class="brutal-card">
+                    <h3>Start Server</h3>
+                    <pre class="brutal-code">cleanserve up</pre>
+                    <p style="font-size: 0.9rem; margin-top: 1rem;">Starts the development server on https://localhost:8080</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>Switch PHP Version</h3>
+                    <pre class="brutal-code">cleanserve use 8.5</pre>
+                    <p style="font-size: 0.9rem; margin-top: 1rem;">Switch to PHP 8.5 instantly</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>List Versions</h3>
+                    <pre class="brutal-code">cleanserve list</pre>
+                    <p style="font-size: 0.9rem; margin-top: 1rem;">Show available PHP versions</p>
+                </div>
+                <div class="brutal-card">
+                    <h3>View Logs</h3>
+                    <pre class="brutal-code">cleanserve logs</pre>
+                    <p style="font-size: 0.9rem; margin-top: 1rem;">Display server logs in real-time</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Getting Help -->
+        <section style="padding: 2rem; background: var(--bg-card); border: 2px solid var(--border); margin-top: 2rem;">
+            <h2>Getting Help</h2>
+            <ul style="list-style: none;">
+                <li style="margin-bottom: 1rem;"><a href="https://github.com/LyeZinho/cleanserve">📚 CleanServe GitHub Repository</a></li>
+                <li style="margin-bottom: 1rem;"><a href="https://github.com/LyeZinho/cleanserve/issues">🐛 Report Issues</a></li>
+                <li style="margin-bottom: 1rem;"><a href="https://github.com/LyeZinho/cleanserve/discussions">💬 Discussions</a></li>
+            </ul>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 CleanServe • Modern PHP Development</p>
+    </footer>
+
+    {js}
+</body>
+</html>"#
+    )
+}
+
+/// Generate quickstart docs.html with API documentation
+fn generate_quickstart_docs() -> String {
+    let css = generate_css();
+    let js = generate_js();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>📡 API Docs - CleanServe</title>
+    {css}
+</head>
+<body>
+    <header>
+        <div style="max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;">
+            <h1 style="margin: 0;">📡 API Docs</h1>
+            <a href="/" class="brutal-btn">← Back to Home</a>
+        </div>
+    </header>
+
+    <main>
+        <!-- Example Endpoint -->
+        <section>
+            <h2>Example API Endpoint</h2>
+            <div class="brutal-card" style="margin-bottom: 1.5rem;">
+                <h3>GET /api/example</h3>
+                
+                <h4 style="margin-top: 1.5rem;">Request</h4>
+                <pre class="brutal-code">curl -s https://localhost:8080/api/example</pre>
+                
+                <h4 style="margin-top: 1.5rem;">Response</h4>
+                <pre class="brutal-code">{{
+  "status": "success",
+  "message": "Hello from CleanServe!",
+  "timestamp": "2026-03-21T12:00:00Z"
+}}</pre>
+
+                <h4 style="margin-top: 1.5rem;">Source Code (app/api/example.php)</h4>
+                <pre class="brutal-code">&lt;?php
+header('Content-Type: application/json');
+echo json_encode([
+  'status' => 'success',
+  'message' => 'Hello from CleanServe!',
+  'timestamp' => date('c')
+]);</pre>
+            </div>
+        </section>
+
+        <!-- Add Your Own Endpoints -->
+        <section>
+            <h2>Add Your Own Endpoints</h2>
+            <div class="brutal-card">
+                <h3>Creating a New Endpoint</h3>
+                <p style="margin-top: 1rem;">Create a new PHP file in <code>app/api/users.php</code></p>
+                
+                <pre class="brutal-code">&lt;?php
+header('Content-Type: application/json');
+
+$users = [
+  ['id' => 1, 'name' => 'Alice'],
+  ['id' => 2, 'name' => 'Bob']
+];
+
+echo json_encode(['data' => $users]);</pre>
+
+                <p style="margin-top: 1rem;">Access it at <code>https://localhost:8080/api/users</code></p>
+                <p style="color: var(--accent); margin-top: 1rem;"><strong>💡 Tip:</strong> Changes are reflected instantly thanks to hot reload!</p>
+            </div>
+        </section>
+
+        <!-- Common Patterns -->
+        <section>
+            <h2>Common Patterns</h2>
+            
+            <div style="margin-bottom: 1.5rem;">
+                <button class="brutal-btn" data-expand style="width: 100%; text-align: left; padding: 1rem;">▶ JSON Response Pattern</button>
+                <div style="display: none; background: var(--bg-card); border: 1px solid var(--border); padding: 1rem; margin-top: 0.5rem;">
+                    <pre class="brutal-code">&lt;?php
+header('Content-Type: application/json');
+$data = ['key' => 'value'];
+http_response_code(200);
+echo json_encode($data);</pre>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 1.5rem;">
+                <button class="brutal-btn" data-expand style="width: 100%; text-align: left; padding: 1rem;">▶ Error Handling Pattern</button>
+                <div style="display: none; background: var(--bg-card); border: 1px solid var(--border); padding: 1rem; margin-top: 0.5rem;">
+                    <pre class="brutal-code">&lt;?php
+header('Content-Type: application/json');
+try {{
+  // Your code here
+  echo json_encode(['status' => 'ok']);
+}} catch (Exception $e) {{
+  http_response_code(500);
+  echo json_encode(['error' => $e->getMessage()]);
+}}</pre>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 1.5rem;">
+                <button class="brutal-btn" data-expand style="width: 100%; text-align: left; padding: 1rem;">▶ CORS Headers Pattern</button>
+                <div style="display: none; background: var(--bg-card); border: 1px solid var(--border); padding: 1rem; margin-top: 0.5rem;">
+                    <pre class="brutal-code">&lt;?php
+header('Access-Control-Allow-Origin: *');
+header('Access-Control-Allow-Methods: GET, POST, PUT, DELETE');
+header('Access-Control-Allow-Headers: Content-Type');
+header('Content-Type: application/json');
+echo json_encode(['message' => 'CORS enabled']);</pre>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 CleanServe • API Documentation</p>
+    </footer>
+
+    {js}
+</body>
+</html>"#
+    )
+}
+
+/// Generate quickstart api-example.html interactive API tester
+fn generate_quickstart_api_example() -> String {
+    let css = generate_css();
+    let js = generate_js();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔌 API Tester - CleanServe</title>
+    {css}
+    <style>
+        .response-container {{
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 0;
+            padding: 1.5rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            max-height: 400px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            display: none;
+            box-shadow: var(--shadow-brutal);
+        }}
+        .response-container.show {{
+            display: block;
+        }}
+        .error {{
+            color: #ef4444;
+        }}
+        .success {{
+            color: var(--accent);
+        }}
+        .input-group {{
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }}
+        .input-group input {{
+            flex: 1;
+            padding: 0.75rem;
+            background: var(--bg-darker);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+        }}
+        .input-group input:focus {{
+            outline: none;
+            border-color: var(--accent);
+        }}
+    </style>
+</head>
+<body>
+    <header>
+        <div style="max-width: 1200px; margin: 0 auto; display: flex; justify-content: space-between; align-items: center;">
+            <h1 style="margin: 0;">🔌 API Tester</h1>
+            <a href="/" class="brutal-btn">← Back to Home</a>
+        </div>
+    </header>
+
+    <main style="max-width: 600px; margin: 0 auto;">
+        <div class="brutal-card">
+            <h2 style="margin-top: 0;">Test API Endpoints</h2>
+            
+            <form id="api-form" style="margin-top: 1.5rem;">
+                <div class="input-group">
+                    <input type="text" id="endpoint" placeholder="/api/example" value="/api/example">
+                    <button type="submit" class="brutal-btn" style="width: auto; padding: 0.75rem 1.5rem;">Send Request</button>
+                </div>
+            </form>
+
+            <div id="response" class="response-container">
+                <div id="response-content"></div>
+            </div>
+
+            <p style="margin-top: 1.5rem; font-size: 0.9rem; color: var(--text-secondary);">
+                💡 <strong>Tip:</strong> Try <code>/api/example</code> first to test the default endpoint.
+            </p>
+        </div>
+    </main>
+
+    <footer>
+        <p>&copy; 2026 CleanServe • API Tester</p>
+    </footer>
+
+    {js}
+    <script>
+        document.getElementById('api-form').addEventListener('submit', async (e) => {{
+            e.preventDefault();
+            const endpoint = document.getElementById('endpoint').value || '/api/example';
+            const responseDiv = document.getElementById('response');
+            const responseContent = document.getElementById('response-content');
+            
+            responseDiv.classList.add('show');
+            responseContent.textContent = '⏳ Loading...';
+            responseContent.className = '';
+            
+            try {{
+                const response = await fetch(`https://localhost:8080${{endpoint}}`);
+                const data = await response.text();
+                
+                if (response.ok) {{
+                    try {{
+                        const json = JSON.parse(data);
+                        responseContent.textContent = JSON.stringify(json, null, 2);
+                        responseContent.className = 'success';
+                    }} catch {{
+                        responseContent.textContent = data;
+                        responseContent.className = 'success';
+                    }}
+                }} else {{
+                    responseContent.textContent = `Error ${{response.status}}: ${{data}}`;
+                    responseContent.className = 'error';
+                }}
+            }} catch (error) {{
+                responseContent.textContent = `Connection Error: ${{error.message}}\n\nMake sure CleanServe is running on https://localhost:8080`;
+                responseContent.className = 'error';
+            }}
+        }});
+    </script>
+</body>
+</html>"#
+    )
+}
+
+pub fn write_quickstart_pages(public_dir: &Path, project_name: &str) -> anyhow::Result<()> {
+    // Write index.html
+    let index_html = public_dir.join("index.html");
+    std::fs::write(&index_html, generate_quickstart_index(project_name))
+        .context("Failed to write public/index.html")?;
+
+    // Write about.html
+    let about_html = public_dir.join("about.html");
+    std::fs::write(&about_html, generate_quickstart_about())
+        .context("Failed to write public/about.html")?;
+
+    // Write docs.html
+    let docs_html = public_dir.join("docs.html");
+    std::fs::write(&docs_html, generate_quickstart_docs())
+        .context("Failed to write public/docs.html")?;
+
+    // Write api-example.html (API tester)
+    let api_tester_html = public_dir.join("api-example.html");
+    std::fs::write(&api_tester_html, generate_quickstart_api_example())
+        .context("Failed to write public/api-example.html")?;
 
     Ok(())
 }
