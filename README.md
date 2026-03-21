@@ -114,17 +114,6 @@ Full documentation is available in the [`docs/`](docs/README.md) directory:
 
 -----
 
-## ✅ Definition of Done (DoD)
-
-For a feature to be considered stable in CleanServe, it must:
-
-  - [ ] Pass regression tests on **Linux, macOS, and Windows**.
-  - [ ] Add less than **5ms** of latency to the Proxy.
-  - [ ] Require no external dependencies (Shared Libs) other than the `cleanserve` binary.
-  - [ ] Be fully documented in the CLI `--help` command.
-
------
-
 ## 🤝 Contributing
 
 CleanServe is a community-focused project. Feel free to open Issues or submit Pull Requests. See the [Contributing Guide](docs/contributing/development-setup.md) for setup instructions.
