@@ -33,8 +33,15 @@ pub enum Commands {
         /// PHP version (e.g., 8.2, 8.4)
         version: String,
     },
-    /// List installed PHP versions
-    List,
+    /// List available and installed PHP versions
+    List {
+        /// Force refresh of the version manifest
+        #[arg(long)]
+        refresh: bool,
+        /// Show only installed versions
+        #[arg(long)]
+        installed: bool,
+    },
     /// Download and install PHP version
     Update {
         /// PHP version to download (e.g., 8.4, 8.3)
@@ -74,8 +81,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Use { version } => {
             commands::use_::run(version).await?;
         }
-        Commands::List => {
-            commands::list::run().await?;
+        Commands::List { refresh, installed } => {
+            commands::list::run(refresh, installed).await?;
         }
         Commands::Update { version } => {
             commands::update::run(version).await?;
