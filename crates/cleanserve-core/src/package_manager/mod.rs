@@ -8,11 +8,13 @@
 //! - Downloader: Fetch + verify packages from remote sources
 //! - Project: Manage per-project package state in cleanserve.json
 
+pub mod cache;
 pub mod downloader;
 pub mod manifest;
 pub mod project;
 pub mod registry;
 
+pub use cache::PackageCache;
 pub use downloader::PackageDownloader;
 pub use project::ProjectPackageManager;
 pub use registry::PackageRegistry;

@@ -101,6 +101,48 @@ impl PackageDownloader {
             _ => format!("{}-{}", os, arch),
         }
     }
+
+    /// Download package with checksum validation
+    pub async fn download_with_verification(url: &str, dest_path: &Path, expected_checksum: &str) -> Result<()> {
+        Self::verify_checksum_format(expected_checksum)?;
+        
+        let client = reqwest::Client::new();
+        let response = client
+            .get(url)
+            .send()
+            .await
+            .map_err(|e| PackageManagerError {
+                message: format!("Failed to download from {}: {}", url, e),
+            })?;
+
+        if !response.status().is_success() {
+            return Err(PackageManagerError {
+                message: format!("Download failed with status {}", response.status()),
+            });
+        }
+
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|e| PackageManagerError {
+                message: format!("Error reading response: {}", e),
+            })?;
+
+        std::fs::write(dest_path, &bytes)
+            .map_err(|e| PackageManagerError {
+                message: format!("Cannot write file: {}", e),
+            })?;
+
+        Self::verify_checksum(dest_path, expected_checksum)?;
+
+        Ok(())
+    }
+
+    /// Helper to verify checksum format
+    fn verify_checksum_format(checksum: &str) -> Result<()> {
+        let (_algorithm, _hash) = Self::validate_checksum_format(checksum)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
