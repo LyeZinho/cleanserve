@@ -13,11 +13,13 @@ pub mod downloader;
 pub mod manifest;
 pub mod project;
 pub mod registry;
+pub mod runtime;
 
 pub use cache::PackageCache;
 pub use downloader::PackageDownloader;
 pub use project::ProjectPackageManager;
 pub use registry::PackageRegistry;
+pub use runtime::{PackageRuntime, RuntimeStatus};
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
