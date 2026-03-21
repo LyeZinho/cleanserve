@@ -90,10 +90,12 @@ pub struct ProxyServer {
     rate_limiter: Arc<RateLimiter>,
     request_validator: Arc<RequestValidator>,
     slowloris_protection: Arc<SlowlorisProtection>,
+    not_found_html: Arc<String>,
 }
 
 impl ProxyServer {
     pub fn new(port: u16, root: String) -> Self {
+        let not_found_html = Self::load_404_html();
         Self {
             port,
             root: Arc::new(root),
@@ -101,11 +103,13 @@ impl ProxyServer {
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
+            not_found_html: Arc::new(not_found_html),
         }
     }
 
     /// Create proxy with shared HMR state (for hot reload integration)
     pub fn new_with_hmr(port: u16, root: String, hmr_state: Arc<RwLock<HmrState>>) -> Self {
+        let not_found_html = Self::load_404_html();
         Self {
             port,
             root: Arc::new(root),
@@ -113,6 +117,22 @@ impl ProxyServer {
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
+            not_found_html: Arc::new(not_found_html),
+        }
+    }
+
+    /// Load 404.html from .cleanserve/pages/ directory
+    fn load_404_html() -> String {
+        let path = PathBuf::from(".cleanserve/pages/404.html");
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                info!("✓ Loaded 404.html from {}", path.display());
+                content
+            }
+            Err(e) => {
+                warn!("Failed to load 404.html from {}: {}. Using fallback.", path.display(), e);
+                "<h1>404 Not Found</h1><p>The requested resource was not found on this server.</p>".to_string()
+            }
         }
     }
 
@@ -130,6 +150,7 @@ impl ProxyServer {
                     let rate_limiter = Arc::clone(&self.rate_limiter);
                     let request_validator = Arc::clone(&self.request_validator);
                     let slowloris_protection = Arc::clone(&self.slowloris_protection);
+                    let not_found_html = Arc::clone(&self.not_found_html);
                     
                     slowloris_protection.register_connection(remote_addr);
                     
@@ -140,7 +161,8 @@ impl ProxyServer {
                             let rate_limiter = Arc::clone(&rate_limiter);
                             let request_validator = Arc::clone(&request_validator);
                             let slowloris_protection = Arc::clone(&slowloris_protection);
-                            handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr)
+                            let not_found_html = Arc::clone(&not_found_html);
+                            handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html)
                         });
                         if let Err(e) = http1::Builder::new()
                             .serve_connection(io, service)
@@ -241,6 +263,7 @@ async fn handle_request(
     request_validator: Arc<RequestValidator>,
     slowloris_protection: Arc<SlowlorisProtection>,
     remote_addr: SocketAddr,
+    not_found_html: Arc<String>,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let ip = remote_addr.ip();
     let is_localhost = ip.is_loopback();
@@ -444,9 +467,7 @@ async fn handle_request(
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
         .header("Content-Type", "text/html")
-        .body(Full::new(Bytes::from(
-            "<h1>404 Not Found</h1><p>The requested resource was not found on this server.</p>",
-        )))
+        .body(Full::new(Bytes::from((*not_found_html).clone())))
         .unwrap())
 }
 
