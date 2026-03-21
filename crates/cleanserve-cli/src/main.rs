@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "cleanserve")]
-#[command(version = "0.1.0")]
+#[command(version = "0.3.0")]
 #[command(about = "Zero-Burden PHP Runtime & Development Server")]
 pub struct Cli {
     #[command(subcommand)]
@@ -63,10 +63,18 @@ mod commands;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing
+    // Initialize tracing with output suppression for clean startup
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env()
-            .add_directive("cleanserve=info".parse().unwrap_or_default()))
+        .with_target(false)
+        .with_level(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::from_default_env()
+                .add_directive("error".parse().unwrap_or_default())
+                .add_directive("cleanserve_cli=info".parse().unwrap_or_default())
+        )
         .init();
     
     let cli = Cli::parse();

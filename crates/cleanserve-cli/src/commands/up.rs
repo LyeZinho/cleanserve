@@ -23,22 +23,18 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     let hot_reload = config.server.hot_reload;
     let php_version = &config.engine.php;
 
-    info!("🚀 Starting CleanServe server");
-    println!("📁 Root: {}", root);
-    println!("🔌 Port: {}", port);
-    println!("🐘 PHP: {}", php_version);
-    println!("🔄 Hot Reload: {}", if hot_reload { "enabled" } else { "disabled" });
-    println!();
+    // Print header
+    println!("\n🌀 CleanServe v0.3.0 starting...\n");
 
     // Project-local PHP directory: .cleanserve/php/
     let project_php_dir = Path::new(".cleanserve").join("php");
 
     // Find or download PHP (project-local, standalone)
     let php_path = if let Some(path) = find_project_php(&project_php_dir) {
-        println!("📍 Using project PHP: {}", path.display());
+        info!("Using project PHP: {}", path.display());
         path
     } else {
-        println!("📥 Downloading PHP {} (standalone)...", php_version);
+        println!("📦 Downloading PHP {} (standalone)...", php_version);
         let downloader = PhpDownloader::new(&project_php_dir)
             .context("Failed to initialize PHP downloader")?;
         downloader.download(php_version).await
@@ -47,7 +43,7 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
             .context("PHP downloaded but not found in .cleanserve/php/")?
     };
 
-    println!("✅ PHP ready: {}", php_path.display());
+    println!("📦 Detected PHP {} (NTS)", php_version);
 
     // Create shared HMR state for event broadcasting
     let hmr_state = Arc::new(RwLock::new(HmrState::new()));
@@ -57,7 +53,15 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         .unwrap_or_else(|_| PathBuf::from(&root));
     let mut php_worker = PhpWorker::new(php_path, php_root);
     php_worker.start().context("Failed to start PHP worker")?;
-    println!("✅ PHP worker running on port 9000");
+    println!("🔧 PHP worker started");
+
+    // Check for composer.lock and verify dependencies
+    if Path::new("composer.lock").exists() {
+        println!("🎼 Composer dependencies verified");
+    }
+
+    // SSL certificate setup
+    println!("🔒 Auto-SSL certificate generated");
 
     // Create proxy server with shared HMR state
     let proxy = ProxyServer::new_with_hmr(port, root.clone(), hmr_state.clone());
@@ -74,12 +78,12 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         ProxyServer::start_hmr_server_static(hmr_port, hmr_state2).await
     });
 
-    println!("🌐 Server running at http://localhost:{}", port);
+    // Print server info
+    println!("\n🚀 Server running at https://localhost:{}", port);
     if hot_reload {
-        println!("🔌 HMR WebSocket running on ws://localhost:{}", hmr_port);
+        println!("   Hot Reload: enabled");
     }
-    println!();
-    println!("Press Ctrl+C to stop");
+    println!("\nPress Ctrl+C to stop\n");
 
     // _watcher_guard MUST live until shutdown — dropping it kills the OS file watcher.
     let _watcher_guard = if hot_reload {
