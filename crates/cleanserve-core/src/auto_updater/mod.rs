@@ -1,8 +1,10 @@
 pub mod checker;
 pub mod downloader;
+pub mod installer;
 
 pub use checker::UpdateChecker;
 pub use downloader::BinaryDownloader;
+pub use installer::UpdateInstaller;
 
 #[derive(Debug, Clone)]
 pub struct UpdateInfo {
