@@ -1,5 +1,6 @@
 use cleanserve_shared::{CleanServeError, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -8,6 +9,8 @@ pub struct CleanServeConfig {
     pub engine: EngineConfig,
     #[serde(default)]
     pub server: ServerConfig,
+    #[serde(default)]
+    pub packages: Option<PackagesConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,6 +50,34 @@ fn default_hot_reload() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackagesConfig {
+    #[serde(flatten)]
+    pub packages: HashMap<String, PackageSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum PackageSpec {
+    Simple(String),
+    Detailed {
+        version: String,
+        #[serde(default)]
+        enabled: bool,
+        #[serde(default)]
+        path: Option<String>,
+    },
+}
+
+impl PackagesConfig {
+    pub fn validate(&self) -> Result<()> {
+        if self.packages.is_empty() {
+            return Ok(());
+        }
+        Ok(())
+    }
+}
+
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
@@ -70,5 +101,12 @@ impl CleanServeConfig {
             .map_err(|e| CleanServeError::Config(format!("Serialize error: {}", e)))?;
         std::fs::write(path, content)
             .map_err(|e| CleanServeError::Config(format!("Write error: {}", e)))
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if let Some(ref packages) = self.packages {
+            packages.validate()?;
+        }
+        Ok(())
     }
 }
