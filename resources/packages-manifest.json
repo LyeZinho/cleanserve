@@ -15,7 +15,9 @@
           },
           "executable": "bin/mysqld",
           "requires": [],
-          "env_vars": {}
+          "env_vars": {},
+          "default_port": 3306,
+          "health_check": "bin/mysqladmin -u root ping"
         }
       }
     },
@@ -34,6 +36,26 @@
           "executable": "src/redis-server",
           "requires": [],
           "env_vars": {}
+        }
+      }
+    },
+    "phpmyadmin": {
+      "name": "phpMyAdmin",
+      "description": "Database management web interface",
+      "homepage": "https://www.phpmyadmin.net/",
+      "versions": {
+        "5.2": {
+          "downloads": {
+            "all": {
+              "url": "https://files.phpmyadmin.net/phpmyadmin-5.2-all-languages.tar.gz",
+              "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          },
+          "executable": "index.php",
+          "requires": ["php", "mysql"],
+          "proxy_path": "/admin",
+          "server_type": "http",
+          "default_port": 8081
         }
       }
     }

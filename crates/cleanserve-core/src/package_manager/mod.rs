@@ -41,6 +41,14 @@ pub struct PackageVersion {
     pub requires: Vec<String>,
     #[serde(default)]
     pub env_vars: std::collections::HashMap<String, String>,
+    #[serde(default)]
+    pub default_port: Option<u16>,
+    #[serde(default)]
+    pub health_check: Option<String>,
+    #[serde(default)]
+    pub proxy_path: Option<String>,
+    #[serde(default)]
+    pub server_type: Option<String>,
 }
 
 /// Download details for a specific platform
