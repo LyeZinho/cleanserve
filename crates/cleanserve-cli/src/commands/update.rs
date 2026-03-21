@@ -1,8 +1,9 @@
 use anyhow::Context;
 use cleanserve_core::PhpDownloader;
+use cleanserve_core::auto_updater::UpdateChecker;
 use std::path::Path;
 
-pub async fn run(version: Option<String>) -> anyhow::Result<()> {
+pub async fn run_php_update(version: Option<String>) -> anyhow::Result<()> {
     let version = version.unwrap_or_else(|| "8.4".to_string());
 
     // Use project-local .cleanserve/php/ directory
@@ -30,4 +31,37 @@ pub async fn run(version: Option<String>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+pub async fn run_cleanserve_update(check_only: bool, force: bool) -> anyhow::Result<()> {
+    let current_version = env!("CARGO_PKG_VERSION");
+    
+    println!("Checking for CleanServe updates...");
+    
+    let info = UpdateChecker::check_for_updates(current_version).await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    
+    println!("Current version: {}", info.current_version);
+    println!("Latest version: {}", info.latest_version);
+    
+    if !info.needs_update && !force {
+        println!("✓ Already up to date!");
+        return Ok(());
+    }
+    
+    if check_only {
+        if info.needs_update {
+            println!("✓ Update available: {} → {}", info.current_version, info.latest_version);
+        }
+        return Ok(());
+    }
+    
+    // Placeholder: In Phase 4b, implement actual update
+    println!("✓ Update would install: {}", info.latest_version);
+    
+    Ok(())
+}
+
+pub async fn run(version: Option<String>) -> anyhow::Result<()> {
+    run_php_update(version).await
 }

@@ -45,11 +45,17 @@ pub enum Commands {
         #[arg(long)]
         installed: bool,
     },
-    /// Download and install PHP version
+    /// Download and install PHP version, or check for CleanServe updates
     Update {
         /// PHP version to download (e.g., 8.4, 8.3)
         #[arg(short, long)]
         version: Option<String>,
+        /// Check for CleanServe updates instead of PHP
+        #[arg(long)]
+        check: bool,
+        /// Force update even if versions match
+        #[arg(long)]
+        force: bool,
     },
     /// Run Composer with project's PHP
     Composer {
@@ -133,8 +139,12 @@ async fn main() -> anyhow::Result<()> {
         Commands::List { refresh, installed } => {
             commands::list::run(refresh, installed).await?;
         }
-        Commands::Update { version } => {
-            commands::update::run(version).await?;
+        Commands::Update { version, check, force } => {
+            if check || version.is_none() {
+                commands::update::run_cleanserve_update(check, force).await?;
+            } else {
+                commands::update::run_php_update(version).await?;
+            }
         }
         Commands::Composer { args } => {
             commands::composer::run(args).await?;
