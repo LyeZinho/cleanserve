@@ -361,53 +361,172 @@ This page was served by CleanServe</code>
 }
 
 /// Generate error.html for PHP runtime errors
-fn generate_default_error() -> String {
+fn generate_default_error(project_name: &str, php_version: &str) -> String {
     let css = generate_css();
 
     format!(
         r#"<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚠️ Runtime Error</title>
-  {css}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error — {}</title>
+    {css}
+    <style>
+        .error-stack {{ font-family: 'JetBrains Mono', monospace; font-size: 0.8em; white-space: pre-wrap; word-break: break-word; }}
+        .error-file {{ color: var(--accent); font-weight: 600; }}
+    </style>
 </head>
 <body>
-  <header>
-    <h1 style="margin: 0; font-size: 1.5rem;">🌀 CleanServe</h1>
-  </header>
-
-  <main>
-    <section class="p-4" style="margin-top: 2rem;">
-      <div class="glass-brutal" style="border-left: 6px solid #ef4444; max-width: 800px; margin: 0 auto;">
-        <h2 style="color: #ef4444;">⚠️ PHP Runtime Error</h2>
-        <p style="color: var(--text-secondary); margin: 1rem 0;">
-          An error occurred while processing your request. Check the server logs for details.
-        </p>
-
-        <div class="brutal-code mt-4">
-<pre style="color: #fca5a5;">Please check:
-1. Your PHP code syntax
-2. File permissions
-3. Server logs in .cleanserve/
-4. Installed extensions</pre>
+    <header>
+        <div style="max-width: 1200px; margin: 0 auto;">
+            <h1 style="color: var(--accent); margin-bottom: 0.5rem;">Error Encountered</h1>
+            <p style="color: var(--text-secondary); font-size: 0.9em;">Project: <strong>{}</strong></p>
         </div>
-
-        <div class="mt-4">
-          <p style="font-size: 0.875rem; color: var(--text-secondary);">
-            💡 <strong>Tip:</strong> Run <code style="background: var(--bg-darker); padding: 0.25rem 0.5rem;">cleanserve logs</code> to see detailed output.
-          </p>
+    </header>
+    
+    <main style="max-width: 1200px; margin: 0 auto;">
+        <div class="glass-brutal" style="margin: 2rem 0;">
+            <div style="margin-bottom: 2rem;">
+                <h2 style="color: var(--accent); margin-bottom: 1rem;">What Happened?</h2>
+                <p>A PHP error occurred while processing your request. Check the details below and the server logs for more information.</p>
+            </div>
+            
+            <div style="background: var(--bg-darker); border-left: 4px solid var(--accent); padding: 1.5rem; margin: 1.5rem 0;">
+                <p style="margin: 0; color: var(--text-secondary);">
+                    <span class="error-file">Error details would appear here</span><br>
+                    The actual error message will be injected by the error overlay system.
+                </p>
+            </div>
+            
+            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+                <button class="brutal-btn" onclick="location.reload();">🔄 Retry Request</button>
+                <a href="/" class="brutal-btn" style="text-decoration: none;">← Back to Home</a>
+            </div>
         </div>
-      </div>
-    </section>
-  </main>
+    </main>
+    
+    <footer style="text-align: center; color: var(--text-secondary); font-size: 0.85em; padding: 2rem 1rem;">
+        <p><strong>{}</strong> • PHP {}</p>
+        <p style="margin-top: 0.5rem;">Powered by <strong>CleanServe</strong></p>
+    </footer>
+</body>
+</html>"#,
+        project_name, project_name, project_name, php_version
+    )
+}
 
-  <footer>
-    <p style="font-size: 0.875rem; color: var(--text-secondary);">
-      CleanServe • Zero Config PHP Server
-    </p>
-  </footer>
+/// Generate hmr-test.html for internal HMR testing (hidden from users)
+fn generate_hmr_test_page() -> String {
+    let css = generate_css();
+
+    format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CleanServe HMR Test</title>
+    {css}
+    <style>
+        #messages {{ border: 1px solid var(--border); padding: 1rem; height: 400px; overflow-y: auto; background: var(--bg-darker); border-radius: 0; margin: 1rem 0; font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }}
+        .msg {{ padding: 0.5rem; border-bottom: 1px solid var(--border); }}
+        .msg.connected {{ color: var(--accent); }}
+        .msg.error {{ color: #ef4444; }}
+        .msg.event {{ color: #60a5fa; }}
+        .status {{ display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 0.5rem; }}
+        .status.active {{ background: var(--accent); }}
+        .status.inactive {{ background: #6b7280; }}
+    </style>
+</head>
+<body>
+    <header>
+        <div style="max-width: 1200px; margin: 0 auto;">
+            <h1>🔄 CleanServe HMR Test <span style="font-size: 0.6em; color: var(--text-secondary);">(Internal)</span></h1>
+        </div>
+    </header>
+    
+    <main style="max-width: 1200px; margin: 0 auto;">
+        <div class="glass-brutal">
+            <h2>WebSocket Status</h2>
+            <p>
+                Connection: 
+                <span class="status"></span>
+                <span id="status">Disconnected</span>
+            </p>
+            
+            <h2 style="margin-top: 2rem;">Events Received</h2>
+            <div id="messages"></div>
+            
+            <button class="brutal-btn" onclick="clearMessages()" style="margin-top: 1rem;">Clear Messages</button>
+        </div>
+    </main>
+    
+    <footer style="text-align: center; color: var(--text-secondary); font-size: 0.85em; padding: 2rem 1rem;">
+        <p>For HMR testing only. Edit CSS or PHP files while this page is open.</p>
+    </footer>
+    
+    <script>
+        const messagesDiv = document.getElementById('messages');
+        const statusEl = document.getElementById('status');
+        const statusDot = document.querySelector('.status');
+        
+        function addMessage(type, text) {{
+            const div = document.createElement('div');
+            div.className = 'msg ' + type;
+            div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }}
+        
+        function clearMessages() {{
+            messagesDiv.innerHTML = '';
+        }}
+        
+        function updateStatus(connected) {{
+            statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+            statusDot.className = 'status ' + (connected ? 'active' : 'inactive');
+        }}
+        
+        const wsPort = parseInt(location.port || '80') + 1;
+        const wsUrl = 'ws://' + location.hostname + ':' + wsPort + '/__cleanserve_hmr';
+        
+        addMessage('', 'Connecting to ' + wsUrl + '...');
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {{
+            addMessage('connected', '✅ WebSocket connected');
+            updateStatus(true);
+        }};
+        
+        ws.onmessage = (event) => {{
+            try {{
+                const data = JSON.parse(event.data);
+                if (data.type === 'reload') {{
+                    addMessage('event', '📦 PHP reload requested');
+                }} else if (data.type === 'style') {{
+                    addMessage('event', '🎨 CSS reload: ' + data.path);
+                }} else if (data.type === 'connected') {{
+                    addMessage('event', '🔗 HMR server acknowledged');
+                }} else {{
+                    addMessage('event', '📨 Message: ' + JSON.stringify(data));
+                }}
+            }} catch (e) {{
+                addMessage('error', '❌ Parse error: ' + e.message);
+            }}
+        }};
+        
+        ws.onerror = (e) => {{
+            addMessage('error', '❌ WebSocket error');
+            updateStatus(false);
+        }};
+        
+        ws.onclose = () => {{
+            addMessage('error', '❌ WebSocket disconnected');
+            updateStatus(false);
+        }};
+    </script>
 </body>
 </html>"#
     )
@@ -426,7 +545,7 @@ pub fn write_default_pages(
     std::fs::write(public_dir.join("404.html"), not_found)
         .context("Failed to write public/404.html")?;
 
-    let error = generate_default_error();
+    let error = generate_default_error(project_name, php_version);
     std::fs::write(public_dir.join("error.html"), error)
         .context("Failed to write public/error.html")?;
 
