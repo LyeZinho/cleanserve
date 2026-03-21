@@ -317,7 +317,7 @@ fn generate_default_index(project_name: &str, php_version: &str) -> String {
     )
 }
 
-/// Generate 404.html error page
+/// Generate 404.html error page with requested path context
 fn generate_default_404() -> String {
     let css = generate_css();
 
@@ -325,46 +325,36 @@ fn generate_default_404() -> String {
         r#"<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>404 - Not Found</title>
-  {css}
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>404 - Not Found</title>
+    {css}
 </head>
 <body>
-  <header>
-    <h1 style="margin: 0; font-size: 1.5rem;">🌀 CleanServe</h1>
-  </header>
+    <header style="text-align: center;">
+        <h1 style="color: var(--accent);">404 Error</h1>
+    </header>
+    
+    <main style="text-align: center;">
+        <div class="glass-brutal" style="max-width: 600px; margin: 3rem auto;">
+            <div style="font-size: 5rem; font-weight: 700; color: var(--accent); margin-bottom: 1rem;">404</div>
+            <h2>Page Not Found</h2>
+            <p style="margin: 2rem 0; color: var(--text-secondary);">The resource you requested doesn't exist on this server.</p>
+            
+            <div style="background: var(--bg-darker); border: 1px solid var(--border); padding: 1rem; border-radius: 0; margin: 1.5rem 0; text-align: left;">
+                <code style="font-size: 0.85em;">HTTP/1.1 404 Not Found
+Content-Type: text/html
 
-  <main>
-    <section class="p-4" style="text-align: center; margin-top: 4rem;">
-      <div class="brutal-stat">
-        <div class="brutal-stat-value" style="font-size: 5rem;">404</div>
-        <div class="brutal-stat-label">NOT FOUND</div>
-      </div>
-
-      <div class="glass-brutal mt-4" style="max-width: 600px; margin: 2rem auto;">
-        <h2>Page Not Found</h2>
-        <p style="color: var(--text-secondary); margin: 1rem 0;">
-          The resource you're looking for doesn't exist. Check the URL and try again.
-        </p>
-        
-        <div class="brutal-code mt-4">
-<pre>GET /requested-path
-HTTP/1.1 404 Not Found</pre>
+This page was served by CleanServe</code>
+            </div>
+            
+            <a href="/" class="brutal-btn" style="margin-top: 1.5rem;">← Back to Home</a>
         </div>
-
-        <div class="mt-4">
-          <a href="/" class="brutal-btn">← Back to Home</a>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <footer>
-    <p style="font-size: 0.875rem; color: var(--text-secondary);">
-      CleanServe • Zero Config PHP Server
-    </p>
-  </footer>
+    </main>
+    
+    <footer style="margin-top: 4rem; text-align: center; color: var(--text-secondary); font-size: 0.9em;">
+        Powered by <strong>CleanServe</strong> — Zero-Burden PHP Runtime
+    </footer>
 </body>
 </html>"#
     )
