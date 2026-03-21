@@ -28,7 +28,28 @@ pub async fn run(name: Option<String>, php: String) -> anyhow::Result<()> {
     config.save(config_path)
         .context("Failed to save cleanserve.json")?;
 
-    // Add .cleanserve/ to .gitignore if it exists
+    println!("✓ Created cleanserve.json");
+
+    let public_dir = Path::new("public");
+    if !public_dir.exists() {
+        std::fs::create_dir_all(public_dir)
+            .context("Failed to create public/ directory")?;
+        
+        let index_php = public_dir.join("index.php");
+        std::fs::write(&index_php, r#"<?php
+/**
+ * CleanServe - Zero Config PHP Development Server
+ * This is your application entry point.
+ */
+
+echo "Hello from CleanServe!\n";
+phpinfo();
+"#)
+            .context("Failed to create public/index.php")?;
+        
+        println!("✓ Created public/ directory with index.php");
+    }
+
     let gitignore_path = Path::new(".gitignore");
     let cleanserve_ignore = ".cleanserve/";
     if gitignore_path.exists() {
@@ -50,8 +71,11 @@ pub async fn run(name: Option<String>, php: String) -> anyhow::Result<()> {
         println!("✓ Created .gitignore with .cleanserve/");
     }
 
-    println!("✓ Created cleanserve.json");
-    println!("Run 'cleanserve up' to start the server");
+    println!();
+    println!("Next steps:");
+    println!("  1. Edit public/index.php with your application code");
+    println!("  2. Run 'cleanserve up' to start the server");
+    println!("  3. Open http://localhost:8080 in your browser");
     
     Ok(())
 }
