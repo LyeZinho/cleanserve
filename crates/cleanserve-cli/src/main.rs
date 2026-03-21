@@ -19,6 +19,9 @@ pub enum Commands {
         /// PHP version to use
         #[arg(short, long, default_value = "8.4")]
         php: String,
+        /// Generate quickstart pages
+        #[arg(long)]
+        quickstart: bool,
     },
     /// Start the development server
     Up {
@@ -69,8 +72,8 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     
     match cli.command {
-        Commands::Init { name, php } => {
-            commands::init::run(name, php).await?;
+        Commands::Init { name, php, quickstart } => {
+            commands::init::run(name, php, quickstart).await?;
         }
         Commands::Up { port } => {
             commands::up::run(port).await?;

@@ -1,7 +1,9 @@
 use anyhow::Context;
 use std::path::Path;
 
-pub async fn run(name: Option<String>, php: String) -> anyhow::Result<()> {
+pub mod html_pages;
+
+pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow::Result<()> {
     let project_name = name.unwrap_or_else(|| {
         std::env::current_dir()
             .ok()
@@ -35,17 +37,14 @@ pub async fn run(name: Option<String>, php: String) -> anyhow::Result<()> {
         std::fs::create_dir_all(public_dir)
             .context("Failed to create public/ directory")?;
         
-        let index_php = public_dir.join("index.php");
-        std::fs::write(&index_php, r#"<?php
-/**
- * CleanServe - Zero Config PHP Development Server
- * This is your application entry point.
- */
-
-echo "Hello from CleanServe!\n";
-phpinfo();
-"#)
-            .context("Failed to create public/index.php")?;
+        // Generate HTML pages based on quickstart flag
+        if quickstart {
+            html_pages::write_quickstart_pages(public_dir)
+                .context("Failed to write quickstart pages")?;
+        } else {
+            html_pages::write_default_pages(public_dir)
+                .context("Failed to write default pages")?;
+        }
         
         println!("✓ Created public/ directory with index.php");
     }
