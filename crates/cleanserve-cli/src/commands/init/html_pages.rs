@@ -533,23 +533,25 @@ fn generate_hmr_test_page() -> String {
 }
 
 pub fn write_default_pages(
-    public_dir: &Path,
+    cleanserve_pages_dir: &Path,
     project_name: &str,
     php_version: &str,
 ) -> anyhow::Result<()> {
     let index = generate_default_index(project_name, php_version);
-    std::fs::write(public_dir.join("index.html"), index)
-        .context("Failed to write public/index.html")?;
+    std::fs::write(cleanserve_pages_dir.join("index.html"), index)
+        .context("Failed to write .cleanserve/pages/index.html")?;
 
     let not_found = generate_default_404();
-    std::fs::write(public_dir.join("404.html"), not_found)
-        .context("Failed to write public/404.html")?;
+    std::fs::write(cleanserve_pages_dir.join("404.html"), not_found)
+        .context("Failed to write .cleanserve/pages/404.html")?;
 
     let error = generate_default_error(project_name, php_version);
-    std::fs::write(public_dir.join("error.html"), error)
-        .context("Failed to write public/error.html")?;
+    std::fs::write(cleanserve_pages_dir.join("error.html"), error)
+        .context("Failed to write .cleanserve/pages/error.html")?;
 
     let hmr_test = generate_hmr_test_page();
+    std::fs::write(cleanserve_pages_dir.join("hmr-test.html"), hmr_test)
+        .context("Failed to write .cleanserve/pages/hmr-test.html")?;
 
     Ok(())
 }
@@ -1021,26 +1023,29 @@ fn generate_quickstart_api_example() -> String {
     )
 }
 
-pub fn write_quickstart_pages(public_dir: &Path, project_name: &str) -> anyhow::Result<()> {
+pub fn write_quickstart_pages(
+    cleanserve_pages_dir: &Path,
+    project_name: &str,
+) -> anyhow::Result<()> {
     // Write index.html
-    let index_html = public_dir.join("index.html");
+    let index_html = cleanserve_pages_dir.join("index.html");
     std::fs::write(&index_html, generate_quickstart_index(project_name))
-        .context("Failed to write public/index.html")?;
+        .context("Failed to write .cleanserve/pages/index.html")?;
 
     // Write about.html
-    let about_html = public_dir.join("about.html");
+    let about_html = cleanserve_pages_dir.join("about.html");
     std::fs::write(&about_html, generate_quickstart_about())
-        .context("Failed to write public/about.html")?;
+        .context("Failed to write .cleanserve/pages/about.html")?;
 
     // Write docs.html
-    let docs_html = public_dir.join("docs.html");
+    let docs_html = cleanserve_pages_dir.join("docs.html");
     std::fs::write(&docs_html, generate_quickstart_docs())
-        .context("Failed to write public/docs.html")?;
+        .context("Failed to write .cleanserve/pages/docs.html")?;
 
     // Write api-example.html (API tester)
-    let api_tester_html = public_dir.join("api-example.html");
+    let api_tester_html = cleanserve_pages_dir.join("api-example.html");
     std::fs::write(&api_tester_html, generate_quickstart_api_example())
-        .context("Failed to write public/api-example.html")?;
+        .context("Failed to write .cleanserve/pages/api-example.html")?;
 
     Ok(())
 }
