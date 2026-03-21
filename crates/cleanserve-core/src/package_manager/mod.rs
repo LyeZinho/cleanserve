@@ -8,13 +8,14 @@
 //! - Downloader: Fetch + verify packages from remote sources
 //! - Project: Manage per-project package state in cleanserve.json
 
-pub mod registry;
 pub mod downloader;
+pub mod manifest;
 pub mod project;
+pub mod registry;
 
-pub use registry::PackageRegistry;
 pub use downloader::PackageDownloader;
 pub use project::ProjectPackageManager;
+pub use registry::PackageRegistry;
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -44,9 +45,9 @@ pub struct PackageVersion {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadInfo {
     pub url: String,
-    pub checksum: String,  // sha256:abc123...
+    pub checksum: String, // sha256:abc123...
     #[serde(default)]
-    pub format: Option<String>,  // tar.xz, tar.gz, zip
+    pub format: Option<String>, // tar.xz, tar.gz, zip
 }
 
 /// Error type for package manager operations

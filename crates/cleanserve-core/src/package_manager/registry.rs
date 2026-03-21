@@ -33,8 +33,13 @@ impl PackageRegistry {
 
     /// Load built-in package manifest
     fn load_builtin(&mut self) -> Result<()> {
-        // TODO: Embed manifest as string constant
-        // For now, return empty registry
+        let manifest = super::manifest::Manifest::load_builtin()?;
+        manifest.validate()?;
+
+        for (name, package) in manifest.packages {
+            self.packages.insert(name, package);
+        }
+
         Ok(())
     }
 
@@ -108,5 +113,26 @@ mod tests {
     fn test_get_missing_package() {
         let registry = PackageRegistry::new();
         assert!(registry.get("mysql").is_none());
+    }
+
+    #[test]
+    fn test_registry_with_builtin() {
+        let registry = PackageRegistry::with_builtin();
+        assert!(registry.is_ok());
+
+        let reg = registry.unwrap();
+        assert!(reg.list().len() > 0);
+    }
+
+    #[test]
+    fn test_registry_get_mysql() {
+        let registry = PackageRegistry::with_builtin().unwrap();
+        assert!(registry.get("mysql").is_some());
+    }
+
+    #[test]
+    fn test_registry_get_redis() {
+        let registry = PackageRegistry::with_builtin().unwrap();
+        assert!(registry.get("redis").is_some());
     }
 }

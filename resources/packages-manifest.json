@@ -1,0 +1,41 @@
+{
+  "version": "1.0",
+  "packages": {
+    "mysql": {
+      "name": "MySQL Community Server",
+      "description": "Open-source relational database",
+      "homepage": "https://www.mysql.com/",
+      "versions": {
+        "8.0": {
+          "downloads": {
+            "linux-x64": {
+              "url": "https://dev.mysql.com/get/mysql-server_8.0.35-1ubuntu1_amd64.deb",
+              "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          },
+          "executable": "bin/mysqld",
+          "requires": [],
+          "env_vars": {}
+        }
+      }
+    },
+    "redis": {
+      "name": "Redis",
+      "description": "In-memory data structure store",
+      "homepage": "https://redis.io/",
+      "versions": {
+        "7.0": {
+          "downloads": {
+            "linux-x64": {
+              "url": "https://github.com/redis/redis/archive/7.0.0.tar.gz",
+              "checksum": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          },
+          "executable": "src/redis-server",
+          "requires": [],
+          "env_vars": {}
+        }
+      }
+    }
+  }
+}
