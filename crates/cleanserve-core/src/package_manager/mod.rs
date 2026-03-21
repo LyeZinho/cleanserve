@@ -10,6 +10,7 @@
 
 pub mod cache;
 pub mod downloader;
+pub mod lifecycle;
 pub mod manifest;
 pub mod project;
 pub mod registry;
@@ -17,6 +18,7 @@ pub mod runtime;
 
 pub use cache::PackageCache;
 pub use downloader::PackageDownloader;
+pub use lifecycle::PackageLifecycle;
 pub use project::ProjectPackageManager;
 pub use registry::PackageRegistry;
 pub use runtime::{PackageRuntime, RuntimeStatus};

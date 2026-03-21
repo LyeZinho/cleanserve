@@ -65,6 +65,10 @@ impl PackageRuntime {
     pub fn set_error(&mut self, error: String) {
         self.status = RuntimeStatus::Error(error);
     }
+
+    pub fn set_status(&mut self, status: RuntimeStatus) {
+        self.status = status;
+    }
 }
 
 #[cfg(test)]
