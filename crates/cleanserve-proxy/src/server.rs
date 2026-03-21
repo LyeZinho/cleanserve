@@ -325,17 +325,19 @@ async fn handle_request(
              .expect("valid 403 response"));
      }
 
-     // Check for dangerous uploads
-     if StaticBlacklist::is_in_upload_dir(path) && StaticBlacklist::is_dangerous_upload(path) {
-         warn!("Attempted to serve dangerous upload: {}", path);
-         return Ok(Response::builder()
-             .status(StatusCode::FORBIDDEN)
-             .header("Content-Type", "application/json")
-             .body(Full::new(Bytes::from(
-                 r#"{"error":"forbidden","message":"Executable uploads are not allowed"}"#,
-             )))
-             .expect("valid 403 response"));
-     }
+      // Check for dangerous uploads
+      if StaticBlacklist::is_in_upload_dir(path) && StaticBlacklist::is_dangerous_upload(path) {
+          warn!("Attempted to serve dangerous upload: {}", path);
+          return Ok(Response::builder()
+              .status(StatusCode::FORBIDDEN)
+              .header("Content-Type", "application/json")
+              .body(Full::new(Bytes::from(
+                  r#"{"error":"forbidden","message":"Executable uploads are not allowed"}"#,
+              )))
+              .expect("valid 403 response"));
+      }
+
+      info!("Processing request: {} {}, root={}", method, path, root.as_str());
 
      if method == Method::GET || method == Method::POST {
         let mut request_path = path.to_string();
@@ -388,12 +390,23 @@ async fn handle_request(
         }
 
         // Static file serving (only for GET)
-        if method == Method::GET && file_path.starts_with(root.as_str()) && file_path.is_file() {
+        let is_get = method == Method::GET;
+        let path_starts = file_path.to_string_lossy().starts_with(root.as_str());
+        let is_file = file_path.is_file();
+        
+        if is_get {
+            info!("GET request: file_path={}, root={}, starts_with={}, is_file={}", 
+                  file_path.display(), root.as_str(), path_starts, is_file);
+        }
+        
+        if is_get && path_starts && is_file {
             match tokio::fs::read(&file_path).await {
                 Ok(content) => {
                     let mime = mime_guess::from_path(&file_path)
                         .first_or_octet_stream()
                         .to_string();
+
+                    info!("📄 Serving static file: {} (mime: {})", file_path.display(), mime);
 
                     let resp = Response::builder()
                         .status(StatusCode::OK)
@@ -401,6 +414,7 @@ async fn handle_request(
 
                     if mime.starts_with("text/html") {
                         if let Ok(body) = String::from_utf8(content.clone()) {
+                            info!("🔧 Injecting HMR script into HTML response");
                             let injected = inject_hmr_script(&body);
                             return Ok(resp.body(Full::new(Bytes::from(injected))).unwrap());
                         }
@@ -408,7 +422,9 @@ async fn handle_request(
 
                     return Ok(resp.body(Full::new(Bytes::from(content))).unwrap());
                 }
-                Err(_) => {}
+                Err(e) => {
+                    warn!("Failed to read static file {}: {}", file_path.display(), e);
+                }
             }
         }
     }

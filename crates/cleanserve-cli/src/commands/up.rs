@@ -147,14 +147,39 @@ fn find_project_php(php_dir: &Path) -> Option<PathBuf> {
         for entry in entries.flatten() {
             if let Some(name) = entry.file_name().to_str() {
                 if name.starts_with("php-") {
-                    let php_bin = entry.path().join("php");
+                    let path = entry.path();
+                    
+                    // Check direct php-*/php
+                    let php_bin = path.join("php");
                     if php_bin.exists() {
                         return Some(php_bin);
                     }
-                    // Check bin subdirectory
-                    let php_bin_alt = entry.path().join("bin").join("php");
+                    
+                    // Check php-*/bin/php
+                    let php_bin_alt = path.join("bin").join("php");
                     if php_bin_alt.exists() {
                         return Some(php_bin_alt);
+                    }
+                    
+                    // Check php-*/linux-x64/php-* (for versioned binaries)
+                    if let Ok(platform_entries) = std::fs::read_dir(&path) {
+                        for platform_entry in platform_entries.flatten() {
+                            if let Some(platform_name) = platform_entry.file_name().to_str() {
+                                if platform_name.contains("x64") || platform_name == "bin" {
+                                    let platform_path = platform_entry.path();
+                                    // Look for php or php-X.Y.Z
+                                    if let Ok(bin_entries) = std::fs::read_dir(&platform_path) {
+                                        for bin_entry in bin_entries.flatten() {
+                                            if let Some(bin_name) = bin_entry.file_name().to_str() {
+                                                if bin_name.starts_with("php") && bin_entry.path().is_file() {
+                                                    return Some(bin_entry.path());
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
