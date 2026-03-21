@@ -549,6 +549,8 @@ pub fn write_default_pages(
     std::fs::write(public_dir.join("error.html"), error)
         .context("Failed to write public/error.html")?;
 
+    let hmr_test = generate_hmr_test_page();
+
     Ok(())
 }
 
