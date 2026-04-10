@@ -13,6 +13,19 @@ Requests flow through the following components in order:
 5.  **Static Blacklist**: Blocks access to sensitive configuration files and prevents execution of uploaded scripts.
 6.  **Application**: The request is finally passed to the PHP handler or static file server.
 
+## Network Security
+
+CleanServe protects against Server-Side Request Forgery (SSRF) and DNS rebinding attacks in all download operations:
+
+| Protection | Implementation |
+| :--- | :--- |
+| **Redirect Blocking** | All HTTP clients disable redirects to prevent following untrusted URLs |
+| **URL Validation** | Domains must be in an allowlist (GitHub, PHP.net, etc.) before download |
+| **IP Blocking** | Private IP ranges (127.0.0.0/8, 10.0.0.0/8, 192.168.0.0/16, etc.) are blocked |
+| **Localhost Blocking** | Direct connections to localhost are forbidden |
+| **DNS Cache** | Resolved IPs are cached for 30 seconds to prevent rebinding |
+| **No User Proxy Settings** | CleanServe does not expose proxy configuration to users |
+
 ## Security Headers
 
 CleanServe automatically injects security headers into every response to harden the client-side environment.

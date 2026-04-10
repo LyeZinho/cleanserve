@@ -1,4 +1,4 @@
-use crate::{CleanServeError, Result};
+use crate::{CleanServeError, Result, UrlValidator};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tracing::{info, warn};
@@ -102,7 +102,13 @@ impl VersionManifest {
 
         // Fetch from remote
         info!("Fetching version manifest from {}", MANIFEST_URL);
+        
+        let validator = UrlValidator::new();
+        validator.validate_url(MANIFEST_URL)
+            .map_err(|e| CleanServeError::Download(format!("URL validation failed: {:?}", e)))?;
+
         let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| CleanServeError::Download(format!("HTTP client error: {}", e)))?;

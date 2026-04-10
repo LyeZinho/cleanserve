@@ -1,4 +1,5 @@
 use super::{Result, UpdateCheckerError};
+use crate::UrlValidator;
 use std::path::Path;
 use sha2::Digest;
 
@@ -13,7 +14,15 @@ impl BinaryDownloader {
     ) -> Result<()> {
         let expected_checksum = Self::fetch_checksum(checksum_url, download_url).await?;
 
-        let client = reqwest::Client::new();
+        let validator = UrlValidator::new();
+        validator.validate_url(download_url)
+            .map_err(|e| UpdateCheckerError { message: format!("URL validation failed: {:?}", e) })?;
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .map_err(|e| UpdateCheckerError { message: format!("HTTP client error: {}", e) })?;
         let mut res = client.get(download_url).send().await
             .map_err(|e| UpdateCheckerError { message: format!("Failed to connect to download URL: {}", e) })?;
 
@@ -76,7 +85,11 @@ impl BinaryDownloader {
         let filename = download_url.rsplit('/').next()
             .ok_or_else(|| UpdateCheckerError { message: "Invalid download URL".into() })?;
 
-        let client = reqwest::Client::new();
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .map_err(|e| UpdateCheckerError { message: format!("HTTP client error: {}", e) })?;
         let res = client.get(checksum_url).send().await
             .map_err(|e| UpdateCheckerError { message: format!("Failed to connect to checksum URL: {}", e) })?;
 

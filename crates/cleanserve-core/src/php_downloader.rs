@@ -1,4 +1,4 @@
-use crate::{CleanServeError, Result, VersionManifest};
+use crate::{CleanServeError, Result, UrlValidator, VersionManifest};
 use sha2::{Sha256, Digest};
 use std::path::{Path, PathBuf};
 use tracing::info;
@@ -73,8 +73,12 @@ impl PhpDownloader {
         info!("Downloading PHP {} ({:.1} MB)...", resolved, binary.size_bytes as f64 / 1_048_576.0);
         info!("URL: {}", binary.download_url);
 
+        let validator = UrlValidator::new();
+        validator.validate_url(&binary.download_url)
+            .map_err(|e| CleanServeError::Download(format!("URL validation failed: {:?}", e)))?;
+
         let client = reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::limited(10))
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(120))
             .build()
             .map_err(|e| CleanServeError::Download(format!("HTTP client error: {}", e)))?;

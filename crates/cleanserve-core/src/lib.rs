@@ -18,6 +18,7 @@ pub mod path_traversal;
 pub mod slowloris;
 pub mod package_manager;
 pub mod auto_updater;
+pub mod url_validator;
 
 pub use cleanserve_shared::{CleanServeError, Result};
 pub use config::{CleanServeConfig, EngineConfig, ServerConfig};
@@ -38,3 +39,4 @@ pub use error_overlay::{PhpError, StackFrame, parse_php_error, vscode_link, jetb
 pub use static_blacklist::StaticBlacklist;
 pub use path_traversal::PathTraversal;
 pub use slowloris::SlowlorisProtection;
+pub use url_validator::{UrlValidator, UrlValidationError};

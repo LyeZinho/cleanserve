@@ -1,4 +1,4 @@
-use cleanserve_core::{RateLimiter, RequestValidator, StaticBlacklist, PathTraversal, SlowlorisProtection};
+use cleanserve_core::{RateLimiter, RequestValidator, SecurityHeaders, StaticBlacklist, PathTraversal, SlowlorisProtection};
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
@@ -91,6 +91,7 @@ pub struct ProxyServer {
     request_validator: Arc<RequestValidator>,
     slowloris_protection: Arc<SlowlorisProtection>,
     not_found_html: Arc<String>,
+    security_headers: SecurityHeaders,
 }
 
 impl ProxyServer {
@@ -104,6 +105,7 @@ impl ProxyServer {
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
             not_found_html: Arc::new(not_found_html),
+            security_headers: SecurityHeaders::default(),
         }
     }
 
@@ -118,6 +120,7 @@ impl ProxyServer {
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
             not_found_html: Arc::new(not_found_html),
+            security_headers: SecurityHeaders::default(),
         }
     }
 
@@ -151,6 +154,7 @@ impl ProxyServer {
                     let request_validator = Arc::clone(&self.request_validator);
                     let slowloris_protection = Arc::clone(&self.slowloris_protection);
                     let not_found_html = Arc::clone(&self.not_found_html);
+                    let security_headers = self.security_headers.clone();
                     
                     slowloris_protection.register_connection(remote_addr);
                     
@@ -162,7 +166,7 @@ impl ProxyServer {
                             let request_validator = Arc::clone(&request_validator);
                             let slowloris_protection = Arc::clone(&slowloris_protection);
                             let not_found_html = Arc::clone(&not_found_html);
-                            handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html)
+                            handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, security_headers.clone())
                         });
                         if let Err(e) = http1::Builder::new()
                             .serve_connection(io, service)
@@ -264,6 +268,7 @@ async fn handle_request(
     slowloris_protection: Arc<SlowlorisProtection>,
     remote_addr: SocketAddr,
     not_found_html: Arc<String>,
+    security_headers: SecurityHeaders,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let ip = remote_addr.ip();
     let is_localhost = ip.is_loopback();
@@ -441,9 +446,11 @@ async fn handle_request(
 
                     info!("📄 Serving static file: {} (mime: {})", file_path.display(), mime);
 
-                    let resp = Response::builder()
+                    let mut resp = Response::builder()
                         .status(StatusCode::OK)
                         .header("Content-Type", mime.as_str());
+
+                    resp = inject_security_headers(resp, &security_headers);
 
                     if mime.starts_with("text/html") {
                         if let Ok(body) = String::from_utf8(content.clone()) {
@@ -464,11 +471,16 @@ async fn handle_request(
 
     slowloris_protection.mark_request_complete(remote_addr);
     
-    Ok(Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header("Content-Type", "text/html")
-        .body(Full::new(Bytes::from((*not_found_html).clone())))
-        .unwrap())
+    let not_found_resp = inject_security_headers(
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header("Content-Type", "text/html"),
+        &security_headers,
+    )
+    .body(Full::new(Bytes::from((*not_found_html).clone())))
+    .unwrap();
+    
+    Ok(not_found_resp)
 }
 
 fn inject_hmr_script(html: &str) -> String {
@@ -478,6 +490,15 @@ fn inject_hmr_script(html: &str) -> String {
     } else {
         format!("{}{}", html, script_tag)
     }
+}
+
+fn inject_security_headers(builder: Response::Builder, headers: &SecurityHeaders) -> Response::Builder {
+    let sec_headers = headers.to_headers();
+    let mut builder = builder;
+    for (key, value) in sec_headers {
+        builder = builder.header(&key, &value);
+    }
+    builder
 }
 
 /// Forward request to PHP built-in server on port 9000

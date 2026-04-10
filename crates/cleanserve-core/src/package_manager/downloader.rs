@@ -1,4 +1,5 @@
 use super::{PackageManagerError, Result};
+use crate::UrlValidator;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -105,8 +106,20 @@ impl PackageDownloader {
     /// Download package with checksum validation
     pub async fn download_with_verification(url: &str, dest_path: &Path, expected_checksum: &str) -> Result<()> {
         Self::verify_checksum_format(expected_checksum)?;
-        
-        let client = reqwest::Client::new();
+
+        let validator = UrlValidator::new();
+        validator.validate_url(url)
+            .map_err(|e| PackageManagerError {
+                message: format!("URL validation failed: {:?}", e),
+            })?;
+
+        let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(std::time::Duration::from_secs(300))
+            .build()
+            .map_err(|e| PackageManagerError {
+                message: format!("HTTP client error: {}", e),
+            })?;
         let response = client
             .get(url)
             .send()
