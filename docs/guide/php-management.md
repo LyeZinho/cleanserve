@@ -1,57 +1,82 @@
 # PHP Version Management
 
-CleanServe automates the process of downloading, installing, and switching between PHP versions. This allows you to run different projects on different PHP versions without global installation conflicts.
+CleanServe downloads, caches, and switches PHP runtimes so each project can pin a version without touching the system PHP.
 
 ## Installation and Storage
 
-When you initialize a project or update a version, CleanServe downloads the appropriate Non-Thread Safe (NTS) PHP binaries.
+Binaries come from the [php-runtimes](https://github.com/LyeZinho/php-runtimes) manifest (`linux-x64` NTS builds today).
 
 ### Storage Location
-All binaries are stored in your home directory:
-`~/.cleanserve/bin/php-{version}/`
 
-### Platform-Specific Downloads
-- **Windows**: CleanServe downloads ZIP packages from `windows.php.net` and extracts them to `php-{version}/php.exe`.
-- **Unix/Linux/macOS**: CleanServe downloads `tar.gz` packages from `php.net` and extracts them to `php-{version}/bin/php`.
+New installs go to a **shared cache**:
+
+`~/.cleanserve/php/php-{version}/`
+
+`$CLEANSERVE_HOME` overrides the `~/.cleanserve` prefix.
+
+CleanServe also still finds runtimes that were previously downloaded into a project:
+
+`.cleanserve/php/php-{version}/`
+
+The php-runtimes tarball layout is detected automatically (`php`, `bin/php`, or `linux-x64/php-8.4.19`).
+
+### Version Queries
+
+`engine.php` in `cleanserve.json` can be a minor version (`8.4`) or an exact patch (`8.4.19`):
+
+- `8.4` uses the newest installed `8.4.x`
+- `8.4.19` uses that patch only
 
 ## Managing Versions
 
-### List Installed Versions
-To see which PHP versions are currently installed on your system:
+### List Available and Installed Versions
 
 ```bash
 cleanserve list
+cleanserve list --installed
+cleanserve list --refresh
 ```
 
-### Download a New Version
-To install a specific version:
+### Download a Version
 
 ```bash
 cleanserve update --version 8.4
 ```
 
+`cleanserve update` with no flags installs the version from `cleanserve.json` (or 8.4). Use `cleanserve update --check` to look for CleanServe itself.
+
 ### Switch Project PHP Version
-You can change the version used by the current project by running:
 
 ```bash
 cleanserve use 8.4
 ```
 
-This updates the `engine.version` property in `cleanserve.json`. Each project maintains its own isolated version reference.
+This updates `engine.php` in `cleanserve.json` and downloads the runtime if needed.
+
+## Composer and PHP CLI
+
+Composer and the PHP CLI always use the managed binary:
+
+```bash
+cleanserve composer install
+cleanserve composer create-project yiisoft/app your_project
+cleanserve php -v
+cleanserve php vendor/bin/phpunit
+```
+
+If Composer is not installed on the machine, CleanServe downloads `composer.phar` into `~/.cleanserve/tools/`.
 
 ## Configuring PHP Extensions
 
-PHP extensions are managed via the `cleanserve.json` configuration file. The server automatically enables these extensions in the temporary `php.ini` generated for each project.
+PHP extensions are declared in `cleanserve.json`:
 
 ```json
 {
   "engine": {
-    "version": "8.4",
+    "php": "8.4",
     "extensions": ["mbstring", "openssl", "curl", "pdo_mysql"]
   }
 }
 ```
-
-Extensions listed in the `extensions` array will be loaded when the server starts.
 
 For more details on configuration, see the [Configuration Guide](../getting-started/configuration.md).

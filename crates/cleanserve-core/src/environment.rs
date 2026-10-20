@@ -30,7 +30,7 @@ pub fn build_php_environment(
     // === Server Protocol & Interface ===
     env.insert("SERVER_PROTOCOL".to_string(), "HTTP/1.1".to_string());
     env.insert("GATEWAY_INTERFACE".to_string(), "CGI/1.1".to_string());
-    env.insert("SERVER_SOFTWARE".to_string(), "CleanServe/0.1".to_string());
+    env.insert("SERVER_SOFTWARE".to_string(), "CleanServe/0.3.0".to_string());
 
     // === Server Identity ===
     env.insert("SERVER_NAME".to_string(), server_name.to_string());

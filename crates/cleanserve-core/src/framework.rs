@@ -19,6 +19,8 @@ pub enum Framework {
     WordPress,
     /// Drupal CMS
     Drupal,
+    /// Yii / Yii 3 (yiisoft)
+    Yii,
     /// Unknown/custom framework
     Unknown,
 }
@@ -31,6 +33,7 @@ impl std::fmt::Display for Framework {
             Framework::CodeIgniter => write!(f, "CodeIgniter"),
             Framework::WordPress => write!(f, "WordPress"),
             Framework::Drupal => write!(f, "Drupal"),
+            Framework::Yii => write!(f, "Yii"),
             Framework::Unknown => write!(f, "Unknown"),
         }
     }
@@ -58,6 +61,11 @@ impl FrameworkInfo {
         // Symfony detection
         if root.join("bin/console").exists() && root.join("composer.json").exists() {
             return Self::symfony(root);
+        }
+
+        // Yii / Yii 3 detection
+        if Self::is_yii(root) {
+            return Self::yii(root);
         }
 
         // CodeIgniter detection
@@ -133,6 +141,59 @@ impl FrameworkInfo {
             needs_storage_dirs: true,
             needs_var_dirs: false,
         }
+    }
+
+    fn is_yii(root: &Path) -> bool {
+        let composer = root.join("composer.json");
+        if composer.exists() {
+            if let Ok(content) = std::fs::read_to_string(&composer) {
+                if content.contains("yiisoft/") || content.contains("yiisoft/yii2") {
+                    return true;
+                }
+            }
+        }
+        root.join("yii").exists() && composer.exists()
+    }
+
+    fn yii(root: &Path) -> Self {
+        let entry_point = if root.join("public/index.php").exists() {
+            root.join("public/index.php")
+        } else if root.join("web/index.php").exists() {
+            root.join("web/index.php")
+        } else {
+            root.join("index.php")
+        };
+
+        Self {
+            framework: Framework::Yii,
+            version: Self::detect_yii_version(root),
+            writable_dirs: vec![
+                root.join("runtime"),
+                root.join("public/assets"),
+                root.join("web/assets"),
+            ],
+            entry_point,
+            needs_storage_dirs: false,
+            needs_var_dirs: false,
+        }
+    }
+
+    fn detect_yii_version(root: &Path) -> Option<String> {
+        let composer = root.join("composer.json");
+        if composer.exists() {
+            if let Ok(content) = std::fs::read_to_string(&composer) {
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(require) = json.get("require") {
+                        for key in ["yiisoft/yii-core", "yiisoft/yii-console", "yiisoft/yii2"] {
+                            if let Some(ver) = require.get(key).and_then(|v| v.as_str()) {
+                                return Some(ver.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn wordpress(root: &Path) -> Self {
@@ -277,6 +338,12 @@ impl FrameworkInfo {
                     "upload_max_filesize=64M".to_string(),
                     "post_max_size=64M".to_string(),
                     "max_execution_time=300".to_string(),
+                ]
+            }
+            Framework::Yii => {
+                vec![
+                    "upload_max_filesize=128M".to_string(),
+                    "post_max_size=128M".to_string(),
                 ]
             }
             _ => vec![],

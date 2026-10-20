@@ -120,14 +120,18 @@ CleanServe automatically injects these headers into every response.
 | `use` | `VERSION` | string | (required) | PHP version. |
 | `update` | `--version, -v` | string | (optional) | PHP version to download. |
 | `composer` | `ARGS...` | strings | | Composer arguments. |
+| `composer` | `--php` | string | project / 8.4 | PHP version when no config exists. |
+| `php` | `ARGS...` | strings | | Arguments passed to the PHP CLI. |
 
 ## File and Directory Paths
 
 | Path | Purpose |
 | :--- | :--- |
-| `~/.cleanserve/` | CleanServe home directory. |
-| `~/.cleanserve/bin/` | PHP binary storage. |
-| `~/.cleanserve/bin/php-{version}/` | Specific PHP version. |
+| `~/.cleanserve/` | CleanServe home directory (`$CLEANSERVE_HOME` overrides this). |
+| `~/.cleanserve/php/` | Shared PHP runtime cache. |
+| `~/.cleanserve/php/php-{version}/` | Specific PHP version. |
+| `~/.cleanserve/tools/composer.phar` | Managed Composer binary. |
+| `.cleanserve/php/` | Optional project-local PHP (still detected). |
 | `~/.cleanserve/certs/` | SSL certificates. |
 | `~/.cleanserve/certs/{domain}.key` | Private key. |
 | `~/.cleanserve/certs/{domain}.crt` | Certificate. |

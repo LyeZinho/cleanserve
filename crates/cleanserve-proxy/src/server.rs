@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
+use tokio_rustls::TlsAcceptor;
 use tokio::sync::{broadcast, RwLock};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -92,6 +93,9 @@ pub struct ProxyServer {
     slowloris_protection: Arc<SlowlorisProtection>,
     not_found_html: Arc<String>,
     security_headers: SecurityHeaders,
+    tls_cert: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
+    php_backend_port: u16,
 }
 
 impl ProxyServer {
@@ -106,6 +110,9 @@ impl ProxyServer {
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
             not_found_html: Arc::new(not_found_html),
             security_headers: SecurityHeaders::default(),
+            tls_cert: None,
+            tls_key: None,
+            php_backend_port: 9000,
         }
     }
 
@@ -121,7 +128,22 @@ impl ProxyServer {
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
             not_found_html: Arc::new(not_found_html),
             security_headers: SecurityHeaders::default(),
+            tls_cert: None,
+            tls_key: None,
+            php_backend_port: 9000,
         }
+    }
+
+    /// Terminate TLS on the proxy (self-signed or custom cert).
+    pub fn with_tls(mut self, cert_path: PathBuf, key_path: PathBuf) -> Self {
+        self.tls_cert = Some(cert_path);
+        self.tls_key = Some(key_path);
+        self
+    }
+
+    pub fn with_php_backend(mut self, port: u16) -> Self {
+        self.php_backend_port = port;
+        self
     }
 
     /// Load 404.html from .cleanserve/pages/ directory
@@ -142,12 +164,26 @@ impl ProxyServer {
     pub async fn start(&self) -> anyhow::Result<()> {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         let listener = TcpListener::bind(addr).await?;
-        info!("🚀 CleanServe proxy listening on http://{}", addr);
+
+        let tls_acceptor = match (&self.tls_cert, &self.tls_key) {
+            (Some(cert), Some(key)) => {
+                let config = crate::tls_config::create_tls_config(
+                    cert.to_str().unwrap_or(""),
+                    key.to_str().unwrap_or(""),
+                )
+                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                info!("🚀 CleanServe proxy listening on https://{}", addr);
+                Some(TlsAcceptor::from(Arc::new(config)))
+            }
+            _ => {
+                info!("🚀 CleanServe proxy listening on http://{}", addr);
+                None
+            }
+        };
 
         loop {
             match listener.accept().await {
                 Ok((stream, remote_addr)) => {
-                    let io = TokioIo::new(stream);
                     let root = Arc::clone(&self.root);
                     let hmr_state = Arc::clone(&self.hmr_state);
                     let rate_limiter = Arc::clone(&self.rate_limiter);
@@ -155,31 +191,92 @@ impl ProxyServer {
                     let slowloris_protection = Arc::clone(&self.slowloris_protection);
                     let not_found_html = Arc::clone(&self.not_found_html);
                     let security_headers = self.security_headers.clone();
-                    
+                    let php_backend_port = self.php_backend_port;
+
                     slowloris_protection.register_connection(remote_addr);
-                    
-                    tokio::spawn(async move {
-                        let service = service_fn(move |req| {
-                            let root = Arc::clone(&root);
-                            let hmr_state = Arc::clone(&hmr_state);
-                            let rate_limiter = Arc::clone(&rate_limiter);
-                            let request_validator = Arc::clone(&request_validator);
-                            let slowloris_protection = Arc::clone(&slowloris_protection);
-                            let not_found_html = Arc::clone(&not_found_html);
-                            handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, security_headers.clone())
+
+                    if let Some(acceptor) = tls_acceptor.clone() {
+                        tokio::spawn(async move {
+                            match acceptor.accept(stream).await {
+                                Ok(tls_stream) => {
+                                    Self::serve_http1(
+                                        TokioIo::new(tls_stream),
+                                        root,
+                                        hmr_state,
+                                        rate_limiter,
+                                        request_validator,
+                                        slowloris_protection,
+                                        remote_addr,
+                                        not_found_html,
+                                        security_headers,
+                                        php_backend_port,
+                                    )
+                                    .await;
+                                }
+                                Err(e) => error!("TLS handshake failed: {}", e),
+                            }
                         });
-                        if let Err(e) = http1::Builder::new()
-                            .serve_connection(io, service)
-                            .await
-                        {
-                            error!("Error serving connection: {}", e);
-                        }
-                    });
+                    } else {
+                        tokio::spawn(async move {
+                            Self::serve_http1(
+                                TokioIo::new(stream),
+                                root,
+                                hmr_state,
+                                rate_limiter,
+                                request_validator,
+                                slowloris_protection,
+                                remote_addr,
+                                not_found_html,
+                                security_headers,
+                                php_backend_port,
+                            )
+                            .await;
+                        });
+                    }
                 }
                 Err(e) => {
                     error!("Accept error: {}", e);
                 }
             }
+        }
+    }
+
+    async fn serve_http1<I>(
+        io: TokioIo<I>,
+        root: Arc<String>,
+        hmr_state: Arc<RwLock<HmrState>>,
+        rate_limiter: Arc<RateLimiter>,
+        request_validator: Arc<RequestValidator>,
+        slowloris_protection: Arc<SlowlorisProtection>,
+        remote_addr: SocketAddr,
+        not_found_html: Arc<String>,
+        security_headers: SecurityHeaders,
+        php_backend_port: u16,
+    ) where
+        I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
+    {
+        let service = service_fn(move |req| {
+            let root = Arc::clone(&root);
+            let hmr_state = Arc::clone(&hmr_state);
+            let rate_limiter = Arc::clone(&rate_limiter);
+            let request_validator = Arc::clone(&request_validator);
+            let slowloris_protection = Arc::clone(&slowloris_protection);
+            let not_found_html = Arc::clone(&not_found_html);
+            handle_request(
+                req,
+                root,
+                hmr_state,
+                rate_limiter,
+                request_validator,
+                slowloris_protection,
+                remote_addr,
+                not_found_html,
+                security_headers.clone(),
+                php_backend_port,
+            )
+        });
+        if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+            error!("Error serving connection: {}", e);
         }
     }
 
@@ -269,6 +366,7 @@ async fn handle_request(
     remote_addr: SocketAddr,
     not_found_html: Arc<String>,
     security_headers: SecurityHeaders,
+    php_backend_port: u16,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
     let ip = remote_addr.ip();
     let is_localhost = ip.is_loopback();
@@ -407,7 +505,7 @@ async fn handle_request(
 
         if let Some(ext) = file_path.extension() {
             if ext == "php" {
-                match forward_to_php_worker(req, &request_path).await {
+                match forward_to_php_worker(req, &request_path, php_backend_port).await {
                     Ok(response) => {
                         slowloris_protection.mark_request_complete(remote_addr);
                         return Ok(response);
@@ -492,7 +590,10 @@ fn inject_hmr_script(html: &str) -> String {
     }
 }
 
-fn inject_security_headers(builder: Response::Builder, headers: &SecurityHeaders) -> Response::Builder {
+fn inject_security_headers(
+    builder: hyper::http::response::Builder,
+    headers: &SecurityHeaders,
+) -> hyper::http::response::Builder {
     let sec_headers = headers.to_headers();
     let mut builder = builder;
     for (key, value) in sec_headers {
@@ -501,10 +602,10 @@ fn inject_security_headers(builder: Response::Builder, headers: &SecurityHeaders
     builder
 }
 
-/// Forward request to PHP built-in server on port 9000
 async fn forward_to_php_worker(
     req: Request<hyper::body::Incoming>,
     rewritten_path: &str,
+    php_backend_port: u16,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error>> {
     use http_body_util::BodyExt;
     use hyper_util::client::legacy::Client;
@@ -513,7 +614,8 @@ async fn forward_to_php_worker(
     let method = req.method().clone();
     let headers = req.headers().clone();
 
-    let php_url = format!("http://127.0.0.1:9000{}", rewritten_path);
+    let php_host = format!("127.0.0.1:{}", php_backend_port);
+    let php_url = format!("http://{}{}", php_host, rewritten_path);
 
     // Collect request body
     let body_bytes = req.into_body().collect().await?.to_bytes();
@@ -531,7 +633,7 @@ async fn forward_to_php_worker(
             php_req = php_req.header(key, value);
         }
     }
-    php_req = php_req.header("Host", "127.0.0.1:9000");
+    php_req = php_req.header("Host", &php_host);
 
     let php_req = php_req.body(http_body_util::Full::new(body_bytes))?;
 

@@ -1,0 +1,4 @@
+[submodule "php-runtimes"]
+	path = php-runtimes
+	url = git@github.com:LyeZinho/php-runtimes.git
+	branch = main

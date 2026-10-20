@@ -1,19 +1,17 @@
 use anyhow::Context;
-use cleanserve_core::{PhpDownloader, VersionManifest};
-use std::path::Path;
+use cleanserve_core::{PhpManager, VersionManifest};
 
 pub async fn run(refresh: bool, installed_only: bool) -> anyhow::Result<()> {
-    let php_dir = Path::new(".cleanserve").join("php");
+    let manager = PhpManager::new().ok();
 
     if installed_only {
-        return list_installed(&php_dir);
+        return list_installed(manager.as_ref());
     }
 
     let manifest = VersionManifest::fetch(refresh)
         .await
         .context("Failed to fetch version manifest")?;
 
-    let downloader = PhpDownloader::new(&php_dir).ok();
     let versions = manifest.list_available();
 
     if versions.is_empty() {
@@ -27,9 +25,9 @@ pub async fn run(refresh: bool, installed_only: bool) -> anyhow::Result<()> {
     let mut installed_count = 0u32;
 
     for v in &versions {
-        let is_installed = downloader
+        let is_installed = manager
             .as_ref()
-            .map(|d| d.is_installed(&v.version))
+            .map(|m| m.is_installed(&v.version))
             .unwrap_or(false);
 
         if is_installed {
@@ -53,20 +51,8 @@ pub async fn run(refresh: bool, installed_only: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn list_installed(php_dir: &Path) -> anyhow::Result<()> {
-    if !php_dir.exists() {
-        println!("No PHP versions installed.");
-        println!("Run 'cleanserve update --version 8.4' to install PHP.");
-        return Ok(());
-    }
-
-    let mut versions: Vec<String> = std::fs::read_dir(php_dir)?
-        .flatten()
-        .filter_map(|entry| {
-            let name = entry.file_name().into_string().ok()?;
-            name.strip_prefix("php-").map(|s| s.to_string())
-        })
-        .collect();
+fn list_installed(manager: Option<&PhpManager>) -> anyhow::Result<()> {
+    let versions = manager.map(|m| m.list_installed()).unwrap_or_default();
 
     if versions.is_empty() {
         println!("No PHP versions installed.");
@@ -74,7 +60,6 @@ fn list_installed(php_dir: &Path) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    versions.sort();
     println!("Installed PHP versions:");
     for version in &versions {
         println!("  \u{2022} {}", version);

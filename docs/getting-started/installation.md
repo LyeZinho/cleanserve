@@ -8,7 +8,7 @@ CleanServe runs on Linux, macOS, and Windows. Depending on your installation met
 
 - **Quick Install:** `curl` and `unzip`.
 - **Building from Source:** Rust toolchain (Cargo 1.70+).
-- **PHP Storage:** PHP binaries are stored in `~/.cleanserve/bin/php-{version}/`.
+- **PHP Storage:** PHP binaries are stored in `~/.cleanserve/php/php-{version}/`.
 - **Certificates:** Local TLS certificates are stored in `~/.cleanserve/certs/`.
 
 ## Quick Install
@@ -23,15 +23,15 @@ The script downloads the pre-built binary for your architecture and adds it to y
 
 ## Building from Source
 
-If you prefer to build CleanServe manually, you can clone the repository and use Cargo:
+If you prefer to build CleanServe manually, clone **with submodules** and install the local binary (this overrides the old GitHub release in `~/.local/bin`):
 
 ```bash
-git clone https://github.com/LyeZinho/cleanserve
+git clone --recurse-submodules https://github.com/LyeZinho/cleanserve
 cd cleanserve
-cargo build --release
+./scripts/install-local.sh
 ```
 
-Once complete, the binary will be available at `./target/release/cleanserve`. You can move it to a directory in your `$PATH`.
+Check you are on the new build — `cleanserve --version` must show a **git hash**, e.g. `0.3.0 (c1d55411)`. If you only see `0.3.0`, Composer and PHP discovery fixes are not active yet.
 
 ## Docker Installation
 

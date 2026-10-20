@@ -4,6 +4,7 @@
 //! Development mode generates self-signed certs with 365-day validity.
 //! See `crates/cleanserve-proxy/src/tls_config.rs` for TLS protocol enforcement.
 
+use crate::php_manager::cleanserve_home;
 use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType};
 use std::fs;
 use std::path::PathBuf;
@@ -15,9 +16,8 @@ pub struct SslManager {
 
 impl SslManager {
     pub fn new() -> anyhow::Result<Self> {
-        let cert_dir = dirs::home_dir()
-            .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
-            .join(".cleanserve")
+        let cert_dir = cleanserve_home()
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?
             .join("certs");
 
         fs::create_dir_all(&cert_dir)?;

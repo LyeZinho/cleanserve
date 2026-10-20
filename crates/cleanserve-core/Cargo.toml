@@ -13,6 +13,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 dirs = "5"
 zip = "2"
+url.workspace = true
 
 # SSL and worker dependencies
 rcgen = "0.11"

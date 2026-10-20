@@ -66,13 +66,15 @@ cleanserve list
 
 ## Composer Integration
 
-CleanServe provides a wrapper for Composer to ensure it runs with the correct PHP version for your project.
+CleanServe wraps Composer so it always runs with the project's PHP. If Composer is missing, a `composer.phar` is downloaded automatically.
 
 ```bash
 cleanserve composer install
+cleanserve composer create-project yiisoft/app your_project
+cleanserve php -v
 ```
 
-This uses the PHP binary managed by CleanServe, avoiding conflicts with system-wide PHP installations.
+`create-project` works in an empty directory. After the app is created, CleanServe writes `cleanserve.json` in the new project.
 
 ## Framework Auto-Detection
 
@@ -80,6 +82,7 @@ CleanServe automatically detects common PHP frameworks and configures itself acc
 
 - Laravel
 - Symfony
+- Yii
 - WordPress
 - CodeIgniter
 - Drupal

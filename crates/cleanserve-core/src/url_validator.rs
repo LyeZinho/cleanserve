@@ -2,7 +2,7 @@
 //!
 //! Provides protection against SSRF, DNS rebinding, and other URL-based attacks.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::IpAddr;
 use std::time::{Duration, Instant};
 
 /// Private IP ranges that should never be accessible
@@ -28,6 +28,8 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "github.com",
     "raw.githubusercontent.com",
     "githubusercontent.com",
+    "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
     "downloads.php.net",
     "windows.php.net",
     "windows.php.net/downloads",
@@ -92,7 +94,7 @@ impl UrlValidator {
             ));
         }
 
-        if ip.is_private() {
+        if Self::is_private_ip(ip) {
             return Err(UrlValidationError::PrivateIpBlocked(
                 "Private IP ranges blocked".to_string(),
             ));
@@ -104,7 +106,7 @@ impl UrlValidator {
             ));
         }
 
-        if ip.is_broadcast() {
+        if matches!(ip, IpAddr::V4(v4) if v4.is_broadcast()) {
             return Err(UrlValidationError::ReservedIpBlocked(
                 "Broadcast address blocked".to_string(),
             ));
@@ -119,6 +121,16 @@ impl UrlValidator {
         }
 
         Ok(())
+    }
+
+    fn is_private_ip(ip: &IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => v4.is_private() || v4.is_link_local(),
+            IpAddr::V6(v6) => {
+                let segments = v6.segments();
+                (segments[0] & 0xfe00) == 0xfc00
+            }
+        }
     }
 
     fn resolve_and_validate(&self, hostname: &str) -> Result<Vec<IpAddr>, UrlValidationError> {

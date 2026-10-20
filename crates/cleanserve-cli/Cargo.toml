@@ -7,6 +7,9 @@ edition.workspace = true
 name = "cleanserve"
 path = "src/main.rs"
 
+[package.metadata]
+# build.rs sets CLEANSERVE_GIT_HASH for --version
+
 [dependencies]
 cleanserve-shared = { path = "../cleanserve-shared" }
 cleanserve-core = { path = "../cleanserve-core" }
@@ -18,3 +21,5 @@ anyhow.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 dirs = "5"
+reqwest.workspace = true
+serde_json.workspace = true

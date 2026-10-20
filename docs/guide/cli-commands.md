@@ -10,11 +10,11 @@ Initializes a new CleanServe project in the current directory.
 cleanserve init [--name NAME] [--php VERSION]
 ```
 
-This command scans your `composer.json` (if present) to generate a `cleanserve.json` configuration file. If no PHP version is specified, it defaults to **8.4**.
+This command scans your `composer.json` (if present) to generate a `cleanserve.json` configuration file. It reads the package name and `require.php` constraint, and detects Laravel, Symfony, Yii, WordPress, Drupal, and CodeIgniter for the document root.
 
 **Arguments:**
-- `--name`: The project name. Defaults to the directory name or the name in `composer.json`.
-- `--php`: The PHP version to use for this project.
+- `--name`: The project name. Defaults to the name in `composer.json` or the directory name.
+- `--php`: The PHP version to use. Defaults to a version compatible with `require.php`, or **8.4**.
 
 ## up
 
@@ -45,7 +45,7 @@ Switches the PHP version for the current project.
 cleanserve use VERSION
 ```
 
-This updates the `engine.version` field in your `cleanserve.json` file.
+This updates the `engine.php` field in your `cleanserve.json` file.
 
 **Example:**
 ```bash
@@ -54,37 +54,49 @@ cleanserve use 8.5
 
 ## list
 
-Lists all PHP versions currently installed and managed by CleanServe.
+Lists PHP versions from the php-runtimes manifest and marks which ones are already installed.
 
 ```bash
 cleanserve list
+cleanserve list --installed
 ```
 
-Installed versions are stored in `~/.cleanserve/bin/`.
+Installed versions are stored in `~/.cleanserve/php/` (project-local `.cleanserve/php/` is still detected).
 
 ## update
 
-Downloads and installs a specific PHP version.
+Downloads and installs a PHP version into the shared cache.
 
 ```bash
 cleanserve update [--version VERSION]
 ```
 
 **Arguments:**
-- `--version`: The PHP version to download (e.g., `8.4.1`). If omitted, it checks for updates to the current version.
+- `--version`: The PHP version to download (e.g., `8.4` or `8.4.19`). If omitted, uses `engine.php` from `cleanserve.json`, or 8.4.
+- `--check`: Check for CleanServe application updates instead of installing PHP.
 
 ## composer
 
-Runs Composer commands using the PHP version assigned to the project.
+Runs Composer with the PHP version assigned to the project. Composer itself is downloaded automatically if it is not on the machine.
 
 ```bash
 cleanserve composer ARGS...
 ```
 
-This ensures that Composer uses the exact same PHP environment as your development server, preventing version mismatches during dependency installation.
+`create-project` does **not** require an existing `cleanserve.json`. After the project is created, CleanServe runs `init` in the new directory.
 
 **Example:**
 ```bash
 cleanserve composer install
 cleanserve composer require laravel/framework
+cleanserve composer create-project yiisoft/app your_project
+```
+
+## php
+
+Runs the managed PHP CLI with the same binary the server uses.
+
+```bash
+cleanserve php -v
+cleanserve php artisan migrate
 ```
