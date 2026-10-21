@@ -2,7 +2,7 @@
 //!
 //! Provides protection against SSRF, DNS rebinding, and other URL-based attacks.
 
-use std::net::IpAddr;
+use std::net::{IpAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
 /// Private IP ranges that should never be accessible
@@ -161,12 +161,21 @@ impl UrlValidator {
                 }
             }
 
-            let ips: Vec<IpAddr> = std::net::ToSocketAddrs::to_socket_addrs(hostname)
+            // `to_socket_addrs` requires host:port; bare hostnames fail with "invalid socket address".
+            let ips: Vec<IpAddr> = (hostname, 0u16)
+                .to_socket_addrs()
                 .map_err(|e| {
                     UrlValidationError::InvalidUrl(format!("DNS resolution failed: {}", e))
                 })?
                 .map(|s| s.ip())
                 .collect();
+
+            if ips.is_empty() {
+                return Err(UrlValidationError::InvalidUrl(format!(
+                    "DNS resolution returned no addresses for {}",
+                    hostname
+                )));
+            }
 
             cache.insert(hostname.to_string(), (Instant::now(), ips.clone()));
             Ok(ips)
@@ -216,6 +225,16 @@ mod tests {
             .is_ok());
         assert!(validator
             .validate_url("https://raw.githubusercontent.com/test/file.zip")
+            .is_ok());
+    }
+
+    #[test]
+    fn test_resolves_github_hostnames() {
+        let validator = UrlValidator::new();
+        assert!(validator
+            .validate_url(
+                "https://raw.githubusercontent.com/LyeZinho/php-runtimes/main/manifests/versions.json"
+            )
             .is_ok());
     }
 }

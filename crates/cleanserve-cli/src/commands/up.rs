@@ -3,9 +3,11 @@ use cleanserve_core::{
     ensure_writable_dirs, find_server_ports, prepare_project_php_ini, FrameworkInfo, PhpDownloader,
     PhpManager, PhpWorker, SslManager,
 };
+
+use super::project_env::ensure_document_root;
 use cleanserve_proxy::{HmrEvent, HmrState, ProxyServer};
 use cleanserve_watcher::{FileEvent, FileWatcher};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{error, info};
@@ -83,9 +85,12 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
 
     let hmr_state = Arc::new(RwLock::new(HmrState::new()));
 
-    let php_root = Path::new(&root)
-        .canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(&root));
+    let php_root = ensure_document_root(
+        &project_root,
+        &root,
+        &config.name,
+        &resolved,
+    )?;
     let mut php_worker =
         PhpWorker::new(php_path, php_root).with_php_ini(php_runtime.ini_path);
     let php_backend_port = php_worker

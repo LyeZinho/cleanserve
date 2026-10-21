@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CleanServe HMR Test</title>
+    <style>
+/* === Color Palette === */
+:root {
+  --bg-dark: #09090b;
+  --bg-darker: #18181b;
+  --bg-card: rgba(24, 24, 27, 0.5);
+  --text-primary: #f4f4f5;
+  --text-secondary: #a1a1a6;
+  --accent: #10b981;
+  --accent-dark: #059669;
+  --border: #27272a;
+  --shadow-brutal: 8px 8px 0px 0px rgba(0, 0, 0, 0.5);
+}
+
+/* === Reset & Base === */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html, body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: linear-gradient(135deg, var(--bg-dark) 0%, #0f0f12 100%);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  background-attachment: fixed;
+}
+
+code, pre {
+  font-family: 'JetBrains Mono', 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+/* === Typography === */
+h1 { font-family: 'Space Grotesk', sans-serif; font-size: 3rem; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; }
+h2 { font-family: 'Space Grotesk', sans-serif; font-size: 2rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.5rem; }
+h3 { font-family: 'Space Grotesk', sans-serif; font-size: 1.5rem; font-weight: 600; margin-top: 1.5rem; margin-bottom: 0.5rem; }
+p { margin-bottom: 1rem; color: var(--text-secondary); }
+
+/* === Layout === */
+body > header { padding: 2rem 1rem; border-bottom: 2px solid var(--border); }
+body > main { padding: 2rem 1rem; max-width: 1200px; margin: 0 auto; }
+body > footer { padding: 2rem 1rem; border-top: 2px solid var(--border); text-align: center; }
+
+/* === Brutal Components === */
+.brutal-btn {
+  background: var(--accent);
+  color: var(--bg-dark);
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.1s;
+  font-family: 'Space Grotesk', sans-serif;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  font-size: 0.9rem;
+  box-shadow: var(--shadow-brutal);
+}
+
+.brutal-btn:hover {
+  transform: translate(-4px, -4px);
+  box-shadow: 12px 12px 0px 0px rgba(16, 185, 129, 0.3);
+}
+
+.brutal-btn:active {
+  transform: translate(2px, 2px);
+  box-shadow: 4px 4px 0px 0px rgba(0, 0, 0, 0.5);
+}
+
+.glass-brutal {
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 0;
+  padding: 1.5rem;
+  box-shadow: var(--shadow-brutal);
+}
+
+.brutal-card {
+  background: var(--bg-card);
+  border: 2px solid var(--border);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-brutal);
+  transition: all 0.2s;
+}
+
+.brutal-card:hover {
+  border-color: var(--accent);
+  transform: translate(-2px, -2px);
+}
+
+.brutal-stat {
+  text-align: center;
+  padding: 1rem;
+  background: var(--bg-darker);
+  border: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.brutal-stat-value { font-size: 2rem; font-weight: 700; color: var(--accent); font-family: 'Space Grotesk', sans-serif; }
+.brutal-stat-label { font-size: 0.875rem; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.1em; margin-top: 0.5rem; }
+
+.brutal-code {
+  background: var(--bg-darker);
+  border-left: 4px solid var(--accent);
+  padding: 1rem;
+  overflow-x: auto;
+  font-size: 0.875rem;
+}
+
+/* === Grid & Layout === */
+.grid { display: grid; gap: 1.5rem; }
+.grid-2 { grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+.grid-3 { grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); }
+
+/* === Utility === */
+.text-center { text-align: center; }
+.mt-2 { margin-top: 1rem; }
+.mt-4 { margin-top: 2rem; }
+.mb-2 { margin-bottom: 1rem; }
+.mb-4 { margin-bottom: 2rem; }
+.p-2 { padding: 1rem; }
+.p-4 { padding: 2rem; }
+
+/* === Dark Theme Texture === */
+body::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-image: 
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 2px,
+      rgba(255, 255, 255, 0.03) 2px,
+      rgba(255, 255, 255, 0.03) 4px
+    );
+  pointer-events: none;
+  z-index: 1;
+}
+
+body > * { position: relative; z-index: 2; }
+
+/* === Responsive === */
+@media (max-width: 768px) {
+  h1 { font-size: 2rem; }
+  h2 { font-size: 1.5rem; }
+  body > main { padding: 1rem; }
+  .grid-2, .grid-3 { grid-template-columns: 1fr; }
+}
+</style>
+    <style>
+        #messages { border: 1px solid var(--border); padding: 1rem; height: 400px; overflow-y: auto; background: var(--bg-darker); border-radius: 0; margin: 1rem 0; font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
+        .msg { padding: 0.5rem; border-bottom: 1px solid var(--border); }
+        .msg.connected { color: var(--accent); }
+        .msg.error { color: #ef4444; }
+        .msg.event { color: #60a5fa; }
+        .status { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 0.5rem; }
+        .status.active { background: var(--accent); }
+        .status.inactive { background: #6b7280; }
+    </style>
+</head>
+<body>
+    <header>
+        <div style="max-width: 1200px; margin: 0 auto;">
+            <h1>🔄 CleanServe HMR Test <span style="font-size: 0.6em; color: var(--text-secondary);">(Internal)</span></h1>
+        </div>
+    </header>
+    
+    <main style="max-width: 1200px; margin: 0 auto;">
+        <div class="glass-brutal">
+            <h2>WebSocket Status</h2>
+            <p>
+                Connection: 
+                <span class="status"></span>
+                <span id="status">Disconnected</span>
+            </p>
+            
+            <h2 style="margin-top: 2rem;">Events Received</h2>
+            <div id="messages"></div>
+            
+            <button class="brutal-btn" onclick="clearMessages()" style="margin-top: 1rem;">Clear Messages</button>
+        </div>
+    </main>
+    
+    <footer style="text-align: center; color: var(--text-secondary); font-size: 0.85em; padding: 2rem 1rem;">
+        <p>For HMR testing only. Edit CSS or PHP files while this page is open.</p>
+    </footer>
+    
+    <script>
+        const messagesDiv = document.getElementById('messages');
+        const statusEl = document.getElementById('status');
+        const statusDot = document.querySelector('.status');
+        
+        function addMessage(type, text) {
+            const div = document.createElement('div');
+            div.className = 'msg ' + type;
+            div.textContent = '[' + new Date().toLocaleTimeString() + '] ' + text;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        function clearMessages() {
+            messagesDiv.innerHTML = '';
+        }
+        
+        function updateStatus(connected) {
+            statusEl.textContent = connected ? 'Connected' : 'Disconnected';
+            statusDot.className = 'status ' + (connected ? 'active' : 'inactive');
+        }
+        
+        const wsPort = parseInt(location.port || '80') + 1;
+        const wsUrl = 'ws://' + location.hostname + ':' + wsPort + '/__cleanserve_hmr';
+        
+        addMessage('', 'Connecting to ' + wsUrl + '...');
+        
+        const ws = new WebSocket(wsUrl);
+        
+        ws.onopen = () => {
+            addMessage('connected', '✅ WebSocket connected');
+            updateStatus(true);
+        };
+        
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'reload') {
+                    addMessage('event', '📦 PHP reload requested');
+                } else if (data.type === 'style') {
+                    addMessage('event', '🎨 CSS reload: ' + data.path);
+                } else if (data.type === 'connected') {
+                    addMessage('event', '🔗 HMR server acknowledged');
+                } else {
+                    addMessage('event', '📨 Message: ' + JSON.stringify(data));
+                }
+            } catch (e) {
+                addMessage('error', '❌ Parse error: ' + e.message);
+            }
+        };
+        
+        ws.onerror = (e) => {
+            addMessage('error', '❌ WebSocket error');
+            updateStatus(false);
+        };
+        
+        ws.onclose = () => {
+            addMessage('error', '❌ WebSocket disconnected');
+            updateStatus(false);
+        };
+    </script>
+</body>
+</html>
