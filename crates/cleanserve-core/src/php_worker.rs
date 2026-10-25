@@ -1,10 +1,11 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Stdio};
 use tracing::info;
 
 pub struct PhpWorker {
     php_path: PathBuf,
     root: PathBuf,
+    router: Option<PathBuf>,
     child: Option<Child>,
 }
 
@@ -13,22 +14,44 @@ impl PhpWorker {
         Self {
             php_path,
             root,
+            router: None,
+            child: None,
+        }
+    }
+
+    pub fn with_router(php_path: PathBuf, root: PathBuf, router: PathBuf) -> Self {
+        Self {
+            php_path,
+            root,
+            router: Some(router),
             child: None,
         }
     }
 
     pub fn start(&mut self) -> anyhow::Result<()> {
+        let router = self.router.clone();
+        self.start_with_router(router.as_deref())
+    }
+
+    pub fn start_with_router(&mut self, router: Option<&Path>) -> anyhow::Result<()> {
         self.stop();
         
         info!("🔄 Starting PHP worker: {}", self.php_path.display());
         
-        let child = std::process::Command::new(&self.php_path)
-            .args([
+        let mut cmd = std::process::Command::new(&self.php_path);
+        cmd.args([
                 "-S", "127.0.0.1:9000",
                 "-t", self.root.to_str().unwrap_or("."),
                 "-d", "variables_order=EGPCS",
                 "-d", "cgi.fix_pathinfo=1",
-            ])
+            ]);
+
+        if let Some(router) = router {
+            cmd.arg(router);
+            info!("Using front-controller router: {}", router.display());
+        }
+
+        let child = cmd
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()?;

@@ -16,15 +16,33 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
         anyhow::bail!("cleanserve.json already exists. Remove it first.");
     }
     
+    let project_root = std::env::current_dir().context("Cannot read current directory")?;
+    let layout = cleanserve_core::ProjectLayout::detect(&project_root);
+    let php_version = layout.suggested_php.clone().unwrap_or_else(|| php.clone());
+
+    let mut server = cleanserve_core::ServerConfig::default();
+    if Path::new("composer.json").exists() {
+        server.root = layout.document_root_for_config(&project_root);
+        println!(
+            "✓ Detected {} — document root: {}",
+            layout.framework,
+            server.root
+        );
+    }
+
+    let server_port = server.port;
+
+    let server_port = server.port;
+
     let config = cleanserve_core::CleanServeConfig {
         name: project_name.clone(),
         engine: cleanserve_core::EngineConfig {
-            php: php.clone(),
+            php: php_version.clone(),
             extensions: vec![],
             display_errors: true,
             memory_limit: None,
         },
-        server: cleanserve_core::ServerConfig::default(),
+        server,
         packages: None,
     };
     
@@ -40,8 +58,11 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
     
     println!("✓ Created .cleanserve/pages/ directory");
 
+    let skip_public_scaffold = layout.framework == cleanserve_core::framework::Framework::Yii2
+        || Path::new("composer.json").exists();
+
     let public_dir = Path::new("public");
-    if !public_dir.exists() {
+    if !skip_public_scaffold && !public_dir.exists() {
         std::fs::create_dir_all(public_dir)
             .context("Failed to create public/ directory")?;
         
@@ -50,7 +71,7 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
             html_pages::write_quickstart_pages(&cleanserve_pages_dir, &project_name)
                 .context("Failed to write quickstart pages")?;
         } else {
-            html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php)
+            html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php_version)
                 .context("Failed to write default pages")?;
         }
         
@@ -80,9 +101,17 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
 
     println!();
     println!("Next steps:");
-    println!("  1. Edit public/index.php with your application code");
-    println!("  2. Run 'cleanserve up' to start the server");
-    println!("  3. Open http://localhost:8080 in your browser");
+    if layout.framework == cleanserve_core::framework::Framework::Yii2 {
+        println!("  1. Run `cleanserve php init` (Yii environment setup)");
+        println!("  2. Run `cleanserve composer install`");
+        println!("  3. Run `cleanserve up` and open https://localhost:{}", server_port);
+    } else {
+        println!("  1. Edit {}/index.php with your application code", config.server.root.trim_end_matches('/'));
+        println!("  2. Run `cleanserve up` to start the server");
+        println!("  3. Open https://localhost:{}", server_port);
+    }
+    println!();
+    println!("Tip: use the binary from this repo: cargo build --release && ./target/release/cleanserve");
     
     Ok(())
 }

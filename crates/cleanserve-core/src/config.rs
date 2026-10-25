@@ -32,6 +32,9 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default = "default_hot_reload")]
     pub hot_reload: bool,
+    /// Serve HTTPS with a local self-signed certificate (default: true).
+    #[serde(default = "default_tls")]
+    pub tls: bool,
 }
 
 fn default_display_errors() -> bool {
@@ -47,6 +50,10 @@ fn default_port() -> u16 {
 }
 
 fn default_hot_reload() -> bool {
+    true
+}
+
+fn default_tls() -> bool {
     true
 }
 
@@ -84,6 +91,7 @@ impl Default for ServerConfig {
             root: default_root(),
             port: default_port(),
             hot_reload: default_hot_reload(),
+            tls: default_tls(),
         }
     }
 }

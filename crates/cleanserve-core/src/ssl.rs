@@ -4,7 +4,7 @@
 //! Development mode generates self-signed certs with 365-day validity.
 //! See `crates/cleanserve-proxy/src/tls_config.rs` for TLS protocol enforcement.
 
-use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType};
+use rcgen::{Certificate, CertificateParams, DistinguishedName, DnType, SanType};
 use std::fs;
 use std::path::PathBuf;
 use tracing::info;
@@ -42,6 +42,10 @@ impl SslManager {
         distinguished_name.push(DnType::OrganizationName, "CleanServe");
         distinguished_name.push(DnType::CountryName, "XX");
         cert_params.distinguished_name = distinguished_name;
+        cert_params.subject_alt_names = vec![
+            SanType::DnsName(domain.try_into().map_err(|e| anyhow::anyhow!("Invalid SAN: {}", e))?),
+            SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+        ];
 
         let not_before = time::OffsetDateTime::now_utc();
         let not_after = not_before + time::Duration::days(365);

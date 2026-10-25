@@ -28,6 +28,12 @@ pub enum Commands {
         /// Port to bind to
         #[arg(short, long)]
         port: Option<u16>,
+        /// Plain logs instead of the Ratatui dashboard
+        #[arg(long)]
+        no_tui: bool,
+        /// HTTP only (no TLS). Browsers must use http://localhost:PORT
+        #[arg(long)]
+        http_only: bool,
     },
     /// Stop the development server
     Down,
@@ -61,6 +67,11 @@ pub enum Commands {
     Composer {
         /// Composer arguments (e.g., install, require package/name)
         #[arg(trailing_var_arg = true)]
+        args: Vec<String>,
+    },
+    /// Run a PHP script with the project's PHP binary (e.g. init for Yii)
+    Php {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
     /// Manage project packages (MySQL, Redis, phpMyAdmin, etc)
@@ -104,6 +115,7 @@ pub enum PackageAction {
 }
 
 mod commands;
+mod tui;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -127,8 +139,8 @@ async fn main() -> anyhow::Result<()> {
         Commands::Init { name, php, quickstart } => {
             commands::init::run(name, php, quickstart).await?;
         }
-        Commands::Up { port } => {
-            commands::up::run(port).await?;
+        Commands::Up { port, no_tui, http_only } => {
+            commands::up::run(port, no_tui, http_only).await?;
         }
         Commands::Down => {
             commands::down::run().await?;
@@ -148,6 +160,9 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Composer { args } => {
             commands::composer::run(args).await?;
+        }
+        Commands::Php { args } => {
+            commands::php::run(args).await?;
         }
         Commands::Package { action } => {
             let project_root = std::env::current_dir()?;

@@ -1,15 +1,18 @@
 use anyhow::Context;
-use cleanserve_core::PhpDownloader;
-use cleanserve_core::PhpWorker;
+use cleanserve_core::{
+    ComposerTool, Framework, FrameworkInfo, PhpWorker, ProjectLayout, RuntimeTelemetry,
+    SslManager, ensure_project_php, ensure_writable_dirs,
+};
 use cleanserve_proxy::{ProxyServer, HmrEvent, HmrState};
 use cleanserve_watcher::{FileWatcher, FileEvent};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::{info, error};
 
-pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
-    // Load config
+pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Result<()> {
+    let project_root = std::env::current_dir().context("Cannot read current directory")?;
+
     let config_path = Path::new("cleanserve.json");
     if !config_path.exists() {
         anyhow::bail!("No cleanserve.json found. Run 'cleanserve init' first.");
@@ -19,89 +22,129 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         .context("Failed to load config")?;
 
     let port = port.unwrap_or(config.server.port);
-    let root = config.server.root.clone();
     let hot_reload = config.server.hot_reload;
-    let php_version = &config.engine.php;
+    let php_version = config.engine.php.clone();
+    let use_tls = config.server.tls && !http_only;
 
-    // Print header
-    println!("\n🌀 CleanServe v0.3.0 starting...\n");
+    let telemetry = Arc::new(RuntimeTelemetry::new());
+    telemetry.push_log("Starting CleanServe...");
 
-    // Project-local PHP directory: .cleanserve/php/
-    let project_php_dir = Path::new(".cleanserve").join("php");
+    let layout = ProjectLayout::detect(&project_root);
 
-    // Find or download PHP (project-local, standalone)
-    let php_path = if let Some(path) = find_project_php(&project_php_dir) {
-        info!("Using project PHP: {}", path.display());
-        path
-    } else {
-        println!("📦 Downloading PHP {} (standalone)...", php_version);
-        let downloader = PhpDownloader::new(&project_php_dir)
-            .context("Failed to initialize PHP downloader")?;
-        downloader.download(php_version).await
-            .context("Failed to download PHP")?;
-        find_project_php(&project_php_dir)
-            .context("PHP downloaded but not found in .cleanserve/php/")?
-    };
+    let mut root = config.server.root.clone();
+    if Path::new("composer.json").exists() {
+        let detected = layout.document_root_for_config(&project_root);
+        let detected_abs = project_root.join(detected.trim_end_matches('/'));
+        if detected != root && detected_abs.exists() {
+            telemetry.push_log(format!(
+                "Document root {} (cleanserve.json had {})",
+                detected,
+                root
+            ));
+            root = detected;
+        } else if layout.framework == Framework::Yii2 && !detected_abs.exists() {
+            telemetry.push_log(
+                "Yii2: run `cleanserve php init` to create frontend/web/index.php".to_string(),
+            );
+        }
+    }
+    let framework_info = FrameworkInfo::detect(&project_root);
+    let _ = ensure_writable_dirs(&framework_info);
 
-    println!("📦 Detected PHP {} (NTS)", php_version);
+    let php_path = ensure_project_php(&project_root, &php_version)
+        .await
+        .context("Failed to prepare project PHP")?;
 
-    // Create shared HMR state for event broadcasting
+    ComposerTool::ensure_vendor(&php_path, &project_root)
+        .await
+        .context("Composer install failed")?;
+
+    let document_root = project_root.join(root.trim_end_matches('/'));
+    if !document_root.exists() {
+        anyhow::bail!(
+            "Document root {} does not exist. For Yii/Laravel projects run the framework init (e.g. ./init) or fix server.root in cleanserve.json.",
+            document_root.display()
+        );
+    }
+
+    let router = layout
+        .router_script
+        .clone()
+        .filter(|p| p.exists());
+
     let hmr_state = Arc::new(RwLock::new(HmrState::new()));
 
-    // Start PHP worker
-    let php_root = Path::new(&root).canonicalize()
-        .unwrap_or_else(|_| PathBuf::from(&root));
-    let mut php_worker = PhpWorker::new(php_path, php_root);
-    php_worker.start().context("Failed to start PHP worker")?;
-    println!("🔧 PHP worker started");
+    let mut php_worker = if let Some(router) = router {
+        PhpWorker::with_router(php_path.clone(), document_root.clone(), router)
+    } else {
+        PhpWorker::new(php_path.clone(), document_root.clone())
+    };
+    php_worker
+        .start()
+        .context("Failed to start PHP worker")?;
+    telemetry.push_log(format!("PHP worker on 127.0.0.1:9000 ({})", php_version));
 
-    // Check for composer.lock and verify dependencies
-    if Path::new("composer.lock").exists() {
-        println!("🎼 Composer dependencies verified");
-    }
+    let tls_material: Option<(String, String)> = if use_tls {
+        let ssl = SslManager::new().context("Failed to init SSL")?;
+        let (key_path, cert_path) = ssl
+            .get_or_create_cert("localhost")
+            .context("Failed to prepare TLS certificate")?;
+        telemetry.push_log("TLS enabled (self-signed localhost cert)");
+        Some((cert_path.to_string_lossy().into_owned(), key_path.to_string_lossy().into_owned()))
+    } else {
+        telemetry.push_log("HTTP only — use https:// only when server.tls is true".to_string());
+        None
+    };
 
-    // SSL certificate setup
-    println!("🔒 Auto-SSL certificate generated");
+    let proxy = ProxyServer::new_with_hmr_and_telemetry(
+        port,
+        root.clone(),
+        hmr_state.clone(),
+        Some(telemetry.clone()),
+    );
 
-    // Create proxy server with shared HMR state
-    let proxy = ProxyServer::new_with_hmr(port, root.clone(), hmr_state.clone());
-
-    // Start proxy server in background
+    let proxy_tls = tls_material.clone();
     let proxy_handle = tokio::spawn(async move {
-        proxy.start().await
+        if let Some((cert, key)) = proxy_tls {
+            proxy.start_https(&cert, &key).await
+        } else {
+            proxy.start().await
+        }
     });
 
-    // Start HMR WebSocket server on port+1
     let hmr_port = port + 1;
     let hmr_state2 = hmr_state.clone();
+    let hmr_tls = tls_material.clone();
     let hmr_handle = tokio::spawn(async move {
-        ProxyServer::start_hmr_server_static(hmr_port, hmr_state2).await
+        if let Some((cert, key)) = hmr_tls {
+            ProxyServer::start_hmr_server_static_tls(hmr_port, hmr_state2, Some(&cert), Some(&key))
+                .await
+        } else {
+            ProxyServer::start_hmr_server_static(hmr_port, hmr_state2).await
+        }
     });
 
-    // Print server info
-    println!("\n🚀 Server running at https://localhost:{}", port);
-    if hot_reload {
-        println!("   Hot Reload: enabled");
-    }
-    println!("\nPress Ctrl+C to stop\n");
+    let scheme = if use_tls { "https" } else { "http" };
+    let url = format!("{}://localhost:{}", scheme, port);
+    telemetry.push_log(format!("Listening on {}", url));
 
-    // _watcher_guard MUST live until shutdown — dropping it kills the OS file watcher.
     let _watcher_guard = if hot_reload {
         let watcher = FileWatcher::new(&root);
         let hmr = hmr_state.clone();
         match watcher.watch() {
             Ok((mut rx, guard)) => {
-                info!("👀 File watcher started");
+                info!("File watcher started");
+                telemetry.push_log("Hot reload enabled");
                 tokio::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
                             FileEvent::PhpChanged(paths) => {
-                                info!("📦 PHP files changed: {:?}", paths);
+                                info!("PHP files changed: {:?}", paths);
                                 let state = hmr.read().await;
                                 state.emit(HmrEvent::PhpReload);
                             }
                             FileEvent::StyleChanged(paths) => {
-                                info!("🎨 Style files changed: {:?}", paths);
+                                info!("Style files changed: {:?}", paths);
                                 let state = hmr.read().await;
                                 for path in paths {
                                     state.emit(HmrEvent::StyleReload(path.to_string_lossy().to_string()));
@@ -113,7 +156,7 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
                 Some(guard)
             }
             Err(e) => {
-                info!("⚠️ File watcher failed to start: {}. Hot reload disabled.", e);
+                telemetry.push_log(format!("Hot reload disabled: {}", e));
                 None
             }
         }
@@ -121,73 +164,57 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         None
     };
 
-    // Wait for Ctrl+C or error
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            println!("\n👋 Server stopped");
-        }
-        result = proxy_handle => {
-            if let Err(e) = result {
-                error!("Proxy error: {}", e);
+    if no_tui {
+        println!("\nCleanServe running at {}\nPress Ctrl+C to stop\n", url);
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            result = proxy_handle => {
+                if let Err(e) = result {
+                    error!("Proxy error: {}", e);
+                }
+            }
+            result = hmr_handle => {
+                if let Err(e) = result {
+                    error!("HMR server error: {}", e);
+                }
             }
         }
-        result = hmr_handle => {
-            if let Err(e) = result {
-                error!("HMR server error: {}", e);
+    } else {
+        let dashboard_state = crate::tui::UpDashboardState {
+            project_name: config.name.clone(),
+            php_version,
+            document_root: root.clone(),
+            url,
+            framework: layout.framework.to_string(),
+            hot_reload,
+            telemetry: telemetry.clone(),
+        };
+
+        let tui_task = tokio::task::spawn_blocking(move || {
+            crate::tui::run_up_dashboard(dashboard_state)
+        });
+
+        tokio::select! {
+            result = tui_task => {
+                if let Err(e) = result {
+                    error!("TUI error: {}", e);
+                } else if let Err(e) = result.unwrap() {
+                    error!("TUI exited with error: {}", e);
+                }
             }
-        }
-    }
-
-    // Cleanup
-    php_worker.stop();
-
-    Ok(())
-}
-
-/// Find PHP binary in project's .cleanserve/php/ directory
-fn find_project_php(php_dir: &Path) -> Option<PathBuf> {
-    // Look for php-X.Y/php (versioned subdirectory)
-    if let Ok(entries) = std::fs::read_dir(php_dir) {
-        for entry in entries.flatten() {
-            if let Some(name) = entry.file_name().to_str() {
-                if name.starts_with("php-") {
-                    let path = entry.path();
-                    
-                    // Check direct php-*/php
-                    let php_bin = path.join("php");
-                    if php_bin.exists() {
-                        return Some(php_bin);
-                    }
-                    
-                    // Check php-*/bin/php
-                    let php_bin_alt = path.join("bin").join("php");
-                    if php_bin_alt.exists() {
-                        return Some(php_bin_alt);
-                    }
-                    
-                    // Check php-*/linux-x64/php-* (for versioned binaries)
-                    if let Ok(platform_entries) = std::fs::read_dir(&path) {
-                        for platform_entry in platform_entries.flatten() {
-                            if let Some(platform_name) = platform_entry.file_name().to_str() {
-                                if platform_name.contains("x64") || platform_name == "bin" {
-                                    let platform_path = platform_entry.path();
-                                    // Look for php or php-X.Y.Z
-                                    if let Ok(bin_entries) = std::fs::read_dir(&platform_path) {
-                                        for bin_entry in bin_entries.flatten() {
-                                            if let Some(bin_name) = bin_entry.file_name().to_str() {
-                                                if bin_name.starts_with("php") && bin_entry.path().is_file() {
-                                                    return Some(bin_entry.path());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+            result = proxy_handle => {
+                if let Err(e) = result {
+                    error!("Proxy error: {}", e);
+                }
+            }
+            result = hmr_handle => {
+                if let Err(e) = result {
+                    error!("HMR server error: {}", e);
                 }
             }
         }
     }
-    None
+
+    php_worker.stop();
+    Ok(())
 }

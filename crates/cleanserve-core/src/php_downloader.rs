@@ -31,16 +31,45 @@ impl PhpDownloader {
 
     /// Get the path to the PHP executable
     pub fn get_php_exe(&self, version: &str) -> Option<PathBuf> {
-        self.php_exe_candidates(version).into_iter().find(|p| p.exists())
+        self.php_exe_candidates(version)
+            .into_iter()
+            .find(|p| p.exists())
     }
 
     /// Candidate paths for the PHP binary
     fn php_exe_candidates(&self, version: &str) -> Vec<PathBuf> {
         let path = self.get_install_path(version);
-        vec![
-            path.join("php"),
-            path.join("bin").join("php"),
-        ]
+        let mut candidates = vec![path.join("php"), path.join("bin").join("php")];
+
+        if let Ok(entries) = std::fs::read_dir(&path) {
+            for entry in entries.flatten() {
+                let platform_path = entry.path();
+                if !platform_path.is_dir() {
+                    continue;
+                }
+                let direct = platform_path.join("php");
+                if direct.is_file() {
+                    candidates.push(direct);
+                }
+                let nested_bin = platform_path.join("bin").join("php");
+                if nested_bin.is_file() {
+                    candidates.push(nested_bin);
+                }
+                if let Ok(bin_entries) = std::fs::read_dir(&platform_path) {
+                    for bin_entry in bin_entries.flatten() {
+                        let bin_path = bin_entry.path();
+                        if bin_path.is_file() {
+                            let name = bin_entry.file_name().to_string_lossy().into_owned();
+                            if name.starts_with("php") {
+                                candidates.push(bin_path);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        candidates
     }
 
     /// Download and install PHP using the version manifest.
@@ -48,14 +77,21 @@ impl PhpDownloader {
     pub async fn download(&self, version: &str) -> Result<()> {
         let manifest = VersionManifest::fetch(false).await?;
 
-        let php_version = manifest.find_version(version).ok_or_else(|| {
+        let php_version = manifest.resolve_version(version).ok_or_else(|| {
             CleanServeError::Download(format!(
-                "PHP {} not found in manifest. Run 'cleanserve list' to see available versions.",
+                "PHP {} is not available. Run 'cleanserve list' to see installable versions.",
                 version
             ))
         })?;
 
         let resolved = &php_version.version;
+        if resolved != version {
+            info!(
+                "PHP {} not in manifest; using compatible build {}",
+                version,
+                resolved
+            );
+        }
 
         if self.is_installed(resolved) {
             info!("PHP {} is already installed", resolved);
@@ -156,5 +192,25 @@ fn current_platform() -> &'static str {
         "windows"
     } else {
         "unknown"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn locates_linux_x64_php_layout() {
+        let dir = TempDir::new().unwrap();
+        let install = dir.path().join("php-8.4.19").join("linux-x64");
+        fs::create_dir_all(&install).unwrap();
+        let bin = install.join("php-8.4.19");
+        fs::write(&bin, b"#!/bin/sh\n").unwrap();
+
+        let downloader = PhpDownloader::new(dir.path()).unwrap();
+        let found = downloader.get_php_exe("8.4.19").expect("binary should be found");
+        assert_eq!(found, bin);
     }
 }
