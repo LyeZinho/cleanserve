@@ -22,6 +22,9 @@ pub enum Commands {
         /// Generate quickstart pages
         #[arg(long)]
         quickstart: bool,
+        /// Only add cleanserve.json to an existing repo (Yii/Laravel/etc.)
+        #[arg(long)]
+        existing: bool,
     },
     /// Start the development server
     Up {
@@ -74,11 +77,51 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Manage project packages (MySQL, Redis, phpMyAdmin, etc)
+    /// Remove cleanserve.json and .cleanserve/ from this project
+    Uninstall,
+    /// Check prerequisites (Docker, etc.)
+    Doctor,
+    /// Install system dependencies for CleanServe
+    Setup {
+        #[command(subcommand)]
+        action: SetupAction,
+    },
+    /// Optional Docker stack services (MySQL, Redis, …) — install only what you need
+    Stack {
+        #[command(subcommand)]
+        action: StackAction,
+    },
+    /// Manage project packages (alias for stack; legacy)
     Package {
         #[command(subcommand)]
         action: PackageAction,
     },
+}
+
+#[derive(Subcommand)]
+pub enum SetupAction {
+    /// Install Docker Engine (distro-aware helper script)
+    Docker,
+}
+
+#[derive(Subcommand)]
+pub enum StackAction {
+    /// List available stack services
+    List,
+    /// Enable a service in this project (generates compose under .cleanserve/stack/)
+    Add {
+        name: String,
+    },
+    /// Disable a service
+    Remove {
+        name: String,
+    },
+    /// Start enabled stack services
+    Up,
+    /// Stop stack services (keeps volumes)
+    Down,
+    /// Show enabled services and container status
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -119,25 +162,19 @@ mod tui;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize tracing with output suppression for clean startup
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .without_time()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("error".parse().unwrap_or_default())
-                .add_directive("cleanserve_cli=info".parse().unwrap_or_default())
-        )
-        .init();
-    
     let cli = Cli::parse();
-    
+
+    let tui_quiet_tracing = matches!(cli.command, Commands::Up { no_tui: false, .. });
+    init_tracing(tui_quiet_tracing);
+
     match cli.command {
-        Commands::Init { name, php, quickstart } => {
-            commands::init::run(name, php, quickstart).await?;
+        Commands::Init { name, php, quickstart, existing } => {
+            if existing || std::path::Path::new("composer.json").exists() && !std::path::Path::new("cleanserve.json").exists() {
+                let root = std::env::current_dir()?;
+                commands::project_config::adopt_existing_project(&root, name, Some(php)).await?;
+            } else {
+                commands::init::run(name, php, quickstart).await?;
+            }
         }
         Commands::Up { port, no_tui, http_only } => {
             commands::up::run(port, no_tui, http_only).await?;
@@ -164,6 +201,23 @@ async fn main() -> anyhow::Result<()> {
         Commands::Php { args } => {
             commands::php::run(args).await?;
         }
+        Commands::Uninstall => {
+            commands::uninstall::run().await?;
+        }
+        Commands::Doctor => {
+            commands::setup::run()?;
+        }
+        Commands::Setup { action } => match action {
+            SetupAction::Docker => commands::setup::run_setup_docker()?,
+        },
+        Commands::Stack { action } => match action {
+            StackAction::List => commands::stack::run_list().await?,
+            StackAction::Add { name } => commands::stack::run_add(&name).await?,
+            StackAction::Remove { name } => commands::stack::run_remove(&name).await?,
+            StackAction::Up => commands::stack::run_up().await?,
+            StackAction::Down => commands::stack::run_down().await?,
+            StackAction::Status => commands::stack::run_status().await?,
+        },
         Commands::Package { action } => {
             let project_root = std::env::current_dir()?;
             match action {
@@ -196,4 +250,27 @@ async fn main() -> anyhow::Result<()> {
     }
     
     Ok(())
+}
+
+fn init_tracing(sink_stderr: bool) {
+    use std::io;
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::from_default_env()
+        .add_directive("error".parse().unwrap_or_default())
+        .add_directive("cleanserve_cli=info".parse().unwrap_or_default());
+
+    let builder = tracing_subscriber::fmt()
+        .with_target(false)
+        .with_level(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time()
+        .with_env_filter(filter);
+
+    if sink_stderr {
+        builder.with_writer(io::sink).init();
+    } else {
+        builder.init();
+    }
 }

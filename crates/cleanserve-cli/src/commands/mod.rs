@@ -7,3 +7,7 @@ pub mod update;
 pub mod composer;
 pub mod php;
 pub mod package;
+pub mod project_config;
+pub mod stack;
+pub mod setup;
+pub mod uninstall;

@@ -32,8 +32,6 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
 
     let server_port = server.port;
 
-    let server_port = server.port;
-
     let config = cleanserve_core::CleanServeConfig {
         name: project_name.clone(),
         engine: cleanserve_core::EngineConfig {

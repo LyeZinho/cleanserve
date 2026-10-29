@@ -25,7 +25,7 @@ impl ComposerTool {
             .map(|o| {
                 String::from_utf8_lossy(&o.stdout)
                     .lines()
-                    .any(|line| line.trim() == "phar")
+                    .any(|line| line.trim().eq_ignore_ascii_case("phar"))
             })
             .unwrap_or(false)
     }

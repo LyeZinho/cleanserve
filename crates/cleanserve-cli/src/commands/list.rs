@@ -1,9 +1,8 @@
 use anyhow::Context;
-use cleanserve_core::{PhpDownloader, VersionManifest};
-use std::path::Path;
+use cleanserve_core::{php_runtime::shared_runtimes_dir, PhpDownloader, VersionManifest};
 
 pub async fn run(refresh: bool, installed_only: bool) -> anyhow::Result<()> {
-    let php_dir = Path::new(".cleanserve").join("php");
+    let php_dir = shared_runtimes_dir().context("Failed to resolve PHP runtimes directory")?;
 
     if installed_only {
         return list_installed(&php_dir);
@@ -53,7 +52,7 @@ pub async fn run(refresh: bool, installed_only: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn list_installed(php_dir: &Path) -> anyhow::Result<()> {
+fn list_installed(php_dir: &std::path::Path) -> anyhow::Result<()> {
     if !php_dir.exists() {
         println!("No PHP versions installed.");
         println!("Run 'cleanserve update --version 8.4' to install PHP.");

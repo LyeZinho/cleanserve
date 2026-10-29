@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "services": {
+    "mysql": {
+      "title": "MySQL 8",
+      "description": "Relational database (official image)",
+      "image": "mysql:8.0",
+      "ports": [{ "host": 3306, "container": 3306 }],
+      "environment": {
+        "MYSQL_ROOT_PASSWORD": "cleanserve",
+        "MYSQL_DATABASE": "app",
+        "MYSQL_USER": "app",
+        "MYSQL_PASSWORD": "cleanserve"
+      },
+      "volumes": ["/var/lib/mysql"],
+      "requires": []
+    },
+    "redis": {
+      "title": "Redis 7",
+      "description": "In-memory cache and queues",
+      "image": "redis:7-alpine",
+      "ports": [{ "host": 6379, "container": 6379 }],
+      "environment": {},
+      "volumes": ["/data"],
+      "requires": []
+    },
+    "mailpit": {
+      "title": "Mailpit",
+      "description": "Local SMTP catcher with web UI",
+      "image": "axllent/mailpit:latest",
+      "ports": [
+        { "host": 1025, "container": 1025 },
+        { "host": 8025, "container": 8025 }
+      ],
+      "environment": {},
+      "volumes": [],
+      "requires": []
+    },
+    "phpmyadmin": {
+      "title": "phpMyAdmin",
+      "description": "Web UI for MySQL (requires mysql stack service)",
+      "image": "phpmyadmin:latest",
+      "ports": [{ "host": 8081, "container": 80 }],
+      "environment": {
+        "PMA_HOST": "mysql",
+        "PMA_USER": "root",
+        "PMA_PASSWORD": "cleanserve"
+      },
+      "volumes": [],
+      "requires": ["mysql"]
+    }
+  }
+}

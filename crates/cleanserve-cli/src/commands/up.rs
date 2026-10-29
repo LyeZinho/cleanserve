@@ -66,6 +66,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
             document_root.display()
         );
     }
+    let _ = cleanserve_core::ensure_dev_router(&project_root, &document_root);
 
     let router = layout
         .router_script
@@ -89,7 +90,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
         let (key_path, cert_path) = ssl
             .get_or_create_cert("localhost")
             .context("Failed to prepare TLS certificate")?;
-        telemetry.push_log("TLS enabled (self-signed localhost cert)");
+        telemetry.push_log("TLS enabled (self-signed localhost cert — accept once in the browser)");
         Some((cert_path.to_string_lossy().into_owned(), key_path.to_string_lossy().into_owned()))
     } else {
         telemetry.push_log("HTTP only — use https:// only when server.tls is true".to_string());
@@ -182,6 +183,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     } else {
         let dashboard_state = crate::tui::UpDashboardState {
             project_name: config.name.clone(),
+            project_root: project_root.clone(),
             php_version,
             document_root: root.clone(),
             url,

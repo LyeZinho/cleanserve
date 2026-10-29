@@ -81,7 +81,16 @@ const HMR_CLIENT_SCRIPT: &str = r#"
     };
     ws.onclose = () => {
         console.log('[CleanServe] HMR disconnected, reconnecting...');
-        setTimeout(() => location.reload(), 3000);
+        setTimeout(function () {
+            try {
+                var ws2 = new WebSocket(wsProto + '//' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
+                ws2.onmessage = ws.onmessage;
+                ws2.onopen = ws.onopen;
+                ws2.onclose = ws.onclose;
+            } catch (e) {
+                console.log('[CleanServe] HMR reconnect failed', e);
+            }
+        }, 1500);
     };
     ws.onopen = () => {
         console.log('[CleanServe] HMR connected on port ' + wsPort);
@@ -201,10 +210,16 @@ impl ProxyServer {
                             let io = match acceptor.accept(stream).await {
                                 Ok(tls_stream) => TokioIo::new(tls_stream),
                                 Err(e) => {
-                                    error!("TLS handshake failed: {}", e);
+                                    if let Some(t) = &telemetry {
+                                        t.record_tls_handshake_failure();
+                                    } else {
+                                        error!("TLS handshake failed: {}", e);
+                                    }
+                                    slowloris_protection.mark_request_complete(remote_addr);
                                     return;
                                 }
                             };
+                            let stderr_logging = telemetry.is_none();
                             let service = service_fn(move |req| {
                                 let root = Arc::clone(&root);
                                 let hmr_state = Arc::clone(&hmr_state);
@@ -216,12 +231,15 @@ impl ProxyServer {
                                 handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry)
                             });
                             if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                                error!("Error serving connection: {}", e);
+                                if stderr_logging {
+                                    error!("Error serving connection: {}", e);
+                                }
                             }
                         });
                     } else {
                         tokio::spawn(async move {
                             let io = TokioIo::new(stream);
+                            let stderr_logging = telemetry.is_none();
                             let service = service_fn(move |req| {
                                 let root = Arc::clone(&root);
                                 let hmr_state = Arc::clone(&hmr_state);
@@ -233,7 +251,9 @@ impl ProxyServer {
                                 handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry)
                             });
                             if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-                                error!("Error serving connection: {}", e);
+                                if stderr_logging {
+                                    error!("Error serving connection: {}", e);
+                                }
                             }
                         });
                     }
@@ -367,7 +387,7 @@ async fn handle_request(
         t.record_request();
         let method = req.method().as_str();
         let path = req.uri().path();
-        t.push_log(format!("{} {}", method, path));
+        t.push_request(format!("{} {}", method, path));
     }
 
     let ip = remote_addr.ip();
@@ -583,8 +603,11 @@ async fn handle_request(
 }
 
 fn inject_hmr_script(html: &str) -> String {
+    if html.contains("__cleanserve_hmr") {
+        return html.to_string();
+    }
     let script_tag = format!(r#"<script>{}</script>"#, HMR_CLIENT_SCRIPT);
-    if let Some(pos) = html.find("</body>") {
+    if let Some(pos) = html.to_ascii_lowercase().rfind("</body>") {
         format!("{}{}{}", &html[..pos], script_tag, &html[pos..])
     } else {
         format!("{}{}", html, script_tag)
@@ -602,8 +625,17 @@ async fn forward_to_php_worker(
 
     let method = req.method().clone();
     let headers = req.headers().clone();
+    let uri = req.uri().clone();
 
-    let php_url = format!("http://127.0.0.1:9000{}", rewritten_path);
+    let mut php_path = rewritten_path.to_string();
+    if let Some(query) = uri.query() {
+        if !query.is_empty() {
+            php_path.push('?');
+            php_path.push_str(query);
+        }
+    }
+
+    let php_url = format!("http://127.0.0.1:9000{}", php_path);
 
     // Collect request body
     let body_bytes = req.into_body().collect().await?.to_bytes();
@@ -634,6 +666,13 @@ async fn forward_to_php_worker(
 
     let mut builder = Response::builder().status(status);
     for (key, value) in resp_headers.iter() {
+        let name = key.as_str();
+        if name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("transfer-encoding")
+            || name.eq_ignore_ascii_case("content-encoding")
+        {
+            continue;
+        }
         builder = builder.header(key, value);
     }
 

@@ -125,6 +125,22 @@ else
   success "CleanServe installed successfully!"
 fi
 
+# Docker prerequisite (optional auto-install)
+if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
+  success "Docker is available."
+else
+  warn "Docker is not running. CleanServe needs Docker for Composer and optional stack services."
+  if [ "${CLEANSERVE_INSTALL_DOCKER:-}" = "1" ] || [ "${CLEANSERVE_INSTALL_DOCKER:-}" = "yes" ]; then
+    if [ -f "$(dirname "$0")/scripts/install-docker.sh" ]; then
+      info "Installing Docker..."
+      sh "$(dirname "$0")/scripts/install-docker.sh" || warn "Docker install failed — run: cleanserve setup docker"
+    fi
+  else
+    printf "  Install later: ${BOLD}cleanserve setup docker${NC}\n"
+    printf "  Or re-run: ${BOLD}CLEANSERVE_INSTALL_DOCKER=1${NC} sh install.sh\n"
+  fi
+fi
+
 case ":${PATH}:" in
   *:"${INSTALL_DIR}":*) ;;
   *)

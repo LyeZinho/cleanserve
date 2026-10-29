@@ -40,6 +40,35 @@ Simply run the official installer (requires `curl` and `unzip`):
 curl -fsSL https://raw.githubusercontent.com/LyeZinho/cleanserve/main/install.sh | sh
 ```
 
+**Docker** is required for Composer (when the bundled PHP has no `phar`) and for optional stack services. Install it with the installer or later:
+
+```bash
+CLEANSERVE_INSTALL_DOCKER=1 sh install.sh   # during install
+cleanserve setup docker                      # after install
+cleanserve doctor                            # verify prerequisites
+```
+
+-----
+
+## 🧩 Modular stack (not XAMPP)
+
+Enable only the services you need per project — MySQL, Redis, Mailpit, phpMyAdmin — under `.cleanserve/stack/`:
+
+```bash
+cleanserve stack list
+cleanserve stack add mysql
+cleanserve stack up
+cleanserve stack status
+```
+
+Removing CleanServe from a project tears down containers, volumes, and local images:
+
+```bash
+cleanserve uninstall
+```
+
+Legacy alias: `cleanserve package add mysql` → same as `stack add`.
+
 -----
 
 ## 🛠 How to Use

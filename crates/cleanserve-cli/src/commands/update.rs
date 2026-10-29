@@ -1,23 +1,22 @@
 use anyhow::Context;
+use cleanserve_core::php_runtime::shared_runtimes_dir;
 use cleanserve_core::PhpDownloader;
 use cleanserve_core::auto_updater::UpdateChecker;
-use std::path::Path;
 
 pub async fn run_php_update(version: Option<String>) -> anyhow::Result<()> {
     let version = version.unwrap_or_else(|| "8.4".to_string());
 
-    // Use project-local .cleanserve/php/ directory
-    let php_dir = Path::new(".cleanserve").join("php");
+    let php_dir = shared_runtimes_dir().context("Failed to resolve PHP runtimes directory")?;
     let downloader = PhpDownloader::new(&php_dir)
         .context("Failed to initialize PHP downloader")?;
 
     // Check if already installed
     if downloader.is_installed(&version) {
-        println!("✅ PHP {} is already installed in .cleanserve/php/", version);
+        println!("✅ PHP {} is already installed in ~/.cleanserve/runtimes/", version);
         return Ok(());
     }
 
-    println!("📦 Downloading PHP {} to .cleanserve/php/...", version);
+    println!("📦 Downloading PHP {} to ~/.cleanserve/runtimes/...", version);
 
     match downloader.download(&version).await {
         Ok(_) => {

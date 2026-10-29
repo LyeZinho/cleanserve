@@ -1,5 +1,6 @@
 //! Detect document root, router, and PHP version from the project tree.
 
+use crate::dev_router::ensure_dev_router;
 use crate::framework::{Framework, FrameworkInfo};
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -27,8 +28,9 @@ impl ProjectLayout {
             Framework::Yii2 => yii2_layout(project_root),
             Framework::Laravel | Framework::Symfony => {
                 let root = project_root.join("public");
-                let router = root.join("index.php");
-                let router = router.exists().then_some(router);
+                let router = ensure_dev_router(project_root, &root)
+                    .ok()
+                    .filter(|p| p.exists());
                 (root, router)
             }
             _ => {
@@ -41,8 +43,9 @@ impl ProjectLayout {
                 } else {
                     project_root.join("public")
                 };
-                let router = root.join("index.php");
-                let router = router.exists().then_some(router);
+                let router = ensure_dev_router(project_root, &root)
+                    .ok()
+                    .filter(|p| p.exists());
                 (root, router)
             }
         };
@@ -72,8 +75,10 @@ impl ProjectLayout {
 
 fn yii2_layout(project_root: &Path) -> (PathBuf, Option<PathBuf>) {
     let root = project_root.join("frontend/web");
-    let router = root.join("index.php");
-    let router = router.exists().then_some(router);
+    // Router is `.cleanserve/router.php` (created on `cleanserve up`) — not index.php
+    let router = ensure_dev_router(project_root, &root)
+        .ok()
+        .filter(|p| p.exists());
     (root, router)
 }
 

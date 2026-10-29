@@ -1,9 +1,9 @@
 use anyhow::Context;
-use cleanserve_core::PhpDownloader;
+use cleanserve_core::{php_runtime::shared_runtimes_dir, PhpDownloader};
 use std::path::Path;
 
 pub async fn run(version: String) -> anyhow::Result<()> {
-    let php_dir = Path::new(".cleanserve").join("php");
+    let php_dir = shared_runtimes_dir().context("Failed to resolve PHP runtimes directory")?;
     let downloader = PhpDownloader::new(&php_dir)
         .context("Failed to initialize PHP downloader")?;
 
