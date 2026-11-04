@@ -1,3 +1,5 @@
+use crate::php_capabilities::is_composer_capable;
+use crate::php_local_build::{build_and_install, remove_matching_installs};
 use crate::php_manager::{find_php_binary, PhpManager};
 use crate::{CleanServeError, Result, UrlValidator, VersionManifest};
 use sha2::{Digest, Sha256};
@@ -195,6 +197,63 @@ impl PhpDownloader {
         }
         self.download(version).await
     }
+
+    /// Ensure a PHP binary with extensions Composer needs (may download or build locally).
+    pub async fn ensure_composer_capable(&self, version: &str) -> Result<PathBuf> {
+        if let Ok(override_path) = std::env::var("CLEANSERVE_COMPOSER_PHP") {
+            let path = PathBuf::from(override_path);
+            if is_composer_capable(&path) {
+                return Ok(path);
+            }
+        }
+
+        if let Some(path) = PhpManager::new()
+            .ok()
+            .and_then(|m| m.get_path(version))
+        {
+            if is_composer_capable(&path) {
+                return Ok(path);
+            }
+            println!(
+                "⚠️  Installed PHP ({}) cannot run Composer (missing phar/tokenizer/…).",
+                path.display()
+            );
+            println!("   Replacing with a Composer-capable build…");
+            remove_matching_installs(version)?;
+        }
+
+        match self.download(version).await {
+            Ok(path) if is_composer_capable(&path) => return Ok(path),
+            Ok(_) => {
+                remove_matching_installs(version)?;
+            }
+            Err(e) => {
+                info!("Could not use published PHP build ({}), trying local build", e);
+                remove_matching_installs(version)?;
+            }
+        }
+
+        if let Some(path) = system_php_for_composer() {
+            return Ok(path);
+        }
+
+        build_and_install(version, &self.base_dir).await
+    }
+}
+
+fn system_php_for_composer() -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let candidate = dir.join("php");
+        if candidate.is_file() && is_composer_capable(&candidate) {
+            println!(
+                "⚠️  Using system PHP {} for Composer.",
+                candidate.display()
+            );
+            return Some(candidate);
+        }
+    }
+    None
 }
 
 pub fn current_platform() -> &'static str {

@@ -62,6 +62,17 @@ esac
 
 info "Detected: ${OS_NAME} ${ARCH_NAME}"
 
+# Docker is required for `cleanserve stack` (MySQL, Redis, ...).
+if [ "${CLEANSERVE_SKIP_DOCKER_CHECK:-0}" != "1" ]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    error "Docker is required. Install Docker (https://docs.docker.com/get-docker/) and retry. Set CLEANSERVE_SKIP_DOCKER_CHECK=1 to skip this check."
+  fi
+  if ! docker compose version >/dev/null 2>&1; then
+    error "Docker Compose plugin is required. Install it (https://docs.docker.com/compose/install/) and retry."
+  fi
+  success "Docker $(docker --version | sed 's/Docker version //;s/,.*//') detected"
+fi
+
 if command -v curl >/dev/null 2>&1; then
   DOWNLOAD_CMD="curl -fsSL"
 elif command -v wget >/dev/null 2>&1; then

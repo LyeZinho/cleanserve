@@ -16,7 +16,15 @@ CleanServe uses a `cleanserve.json` file in the project root for most settings. 
   "server": {
     "root": "public/",
     "port": 8080,
-    "hot_reload": true
+    "hot_reload": true,
+    "domain_suffix": "serve"
+  },
+  "apps": {
+    "frontend": { "root": "frontend/web", "framework": "yii" },
+    "backend": { "root": "backend/web", "framework": "yii" }
+  },
+  "stack": {
+    "mysql": { "version": "8.0", "enabled": true, "port": 3306 }
   }
 }
 ```
@@ -30,9 +38,18 @@ CleanServe uses a `cleanserve.json` file in the project root for most settings. 
 | `engine.extensions` | string[] | `[]` | PHP extensions to enable. |
 | `engine.display_errors` | boolean | `true` | Show PHP errors in browser. |
 | `engine.memory_limit` | string\|null | `null` | PHP memory limit (e.g., "256M"). |
-| `server.root` | string | `"public/"` | Document root directory. |
-| `server.port` | number | `8080` | HTTP server port. |
+| `server.root` | string | `"public/"` | Fallback document root when `apps` is empty. |
+| `server.port` | number | `8080` | HTTP/HTTPS server port. |
 | `server.hot_reload` | boolean | `true` | Enable Hot Module Replacement. |
+| `server.domain_suffix` | string | `"serve"` | Suffix for generated app domains. |
+| `apps.<name>.root` | string | (required) | App document root, relative to the project. |
+| `apps.<name>.domain` | string | auto | Public hostname. |
+| `apps.<name>.framework` | string\|null | auto | Framework adapter (`yii`, `laravel`, ...). |
+| `apps.<name>.router` | string\|null | `index.php` | Front-controller script relative to `root`. |
+| `stack.<name>.version` | string\|null | image default | Docker image tag. |
+| `stack.<name>.enabled` | boolean | `true` | Start automatically with `cleanserve up`. |
+| `stack.<name>.port` | number\|null | service default | Host port. |
+| `stack.<name>.env` | object | `{}` | Extra container environment variables. |
 
 ## Internal Defaults
 

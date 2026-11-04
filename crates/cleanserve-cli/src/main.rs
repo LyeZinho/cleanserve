@@ -89,6 +89,52 @@ pub enum Commands {
         #[command(subcommand)]
         action: PackageAction,
     },
+    /// Configure local development domains (`*.serve`)
+    #[command(alias = "setup-domain")]
+    Setupdomain {
+        /// Remove the resolver/hosts configuration created by this command
+        #[arg(long)]
+        remove: bool,
+    },
+    /// Manage Docker-backed development services
+    Stack {
+        #[command(subcommand)]
+        action: StackAction,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum StackAction {
+    /// Add a service to cleanserve.json and its generated compose file
+    Add {
+        /// Service name (mysql, mariadb, postgres, redis, mailpit, phpmyadmin)
+        name: String,
+        /// Service version/tag (optional)
+        version: Option<String>,
+        /// Host port to expose (optional)
+        #[arg(long)]
+        port: Option<u16>,
+    },
+    /// Remove a service
+    Remove {
+        name: String,
+    },
+    /// List services available and configured in this project
+    List,
+    /// Start configured services
+    Up {
+        /// Start only these services
+        services: Vec<String>,
+    },
+    /// Stop configured services
+    Down,
+    /// Show container status
+    Status,
+    /// Follow service logs
+    Logs {
+        /// Service name (optional, all services when omitted)
+        name: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -206,6 +252,31 @@ async fn main() -> anyhow::Result<()> {
                 PackageAction::Status { name } => {
                     commands::package::PackageCommand::status(name.as_deref())
                         .map_err(|e| anyhow::anyhow!(e))?;
+                }
+            }
+        }
+        Commands::Setupdomain { remove } => {
+            commands::setupdomain::run(remove).await?;
+        }
+        Commands::Stack { action } => {
+            let project_root = std::env::current_dir()?;
+            match action {
+                StackAction::Add {
+                    name,
+                    version,
+                    port,
+                } => commands::stack::add(&name, version.as_deref(), port, &project_root).await?,
+                StackAction::Remove { name } => {
+                    commands::stack::remove(&name, &project_root).await?
+                }
+                StackAction::List => commands::stack::list(&project_root)?,
+                StackAction::Up { services } => {
+                    commands::stack::up(&services, &project_root).await?
+                }
+                StackAction::Down => commands::stack::down(&project_root).await?,
+                StackAction::Status => commands::stack::status(&project_root).await?,
+                StackAction::Logs { name } => {
+                    commands::stack::logs(name.as_deref(), &project_root).await?
                 }
             }
         }

@@ -28,6 +28,9 @@ Setting up a modern PHP environment shouldn't require a PhD in `.conf` files. Cl
       * **Style:** Injects CSS via WebSocket without refresh (Vite-style).
   * 🎼 **Composer Native:** Runs Composer commands using the exact PHP version assigned to the project.
   * 🛠 **Zero Config:** Automatically detects your `public/index.php` and configures necessary extensions via `cleanserve.json`.
+  * 🧩 **Multi-App:** Serves Yii2 Advanced `frontend` and `backend` as separate apps, with framework adapters designed for Laravel and Symfony.
+  * 🌐 **Local Domains:** `cleanserve setupdomain` routes `*.serve` to loopback once; apps get names like `frontend.serve` and `backend.serve`.
+  * 🐳 **Docker Stack:** `cleanserve stack add mysql` manages MySQL, Redis, Postgres, and Mailpit under `.cleanserve/stack/`.
   * 🔒 **Auto HTTPS:** Generates local SSL certificates automatically.
 
 -----
@@ -69,6 +72,20 @@ cleanserve up
 ```
 
 The server will be running at `https://localhost:8080`.
+
+For multiple apps, configure local domains once:
+
+```bash
+cleanserve setupdomain   # *.serve -> 127.0.0.1 (asks for sudo once)
+cleanserve up            # https://frontend.serve, https://backend.serve
+```
+
+Start a database or other service with Docker:
+
+```bash
+cleanserve stack add mysql
+cleanserve stack up
+```
 
 ### 3\. Switch PHP Version
 

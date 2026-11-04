@@ -25,23 +25,57 @@ impl SslManager {
     }
 
     pub fn get_or_create_cert(&self, domain: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
-        let key_path = self.cert_dir.join(format!("{}.key", domain));
-        let cert_path = self.cert_dir.join(format!("{}.crt", domain));
+        self.get_or_create_cert_for_domains(&[domain.to_string()])
+    }
+
+    /// Generate one certificate covering every served hostname (SAN).
+    pub fn get_or_create_cert_for_domains(
+        &self,
+        domains: &[String],
+    ) -> anyhow::Result<(PathBuf, PathBuf)> {
+        let mut names: Vec<String> = domains
+            .iter()
+            .map(|d| d.trim().to_ascii_lowercase())
+            .filter(|d| !d.is_empty())
+            .collect();
+        names.sort();
+        names.dedup();
+        if !names.iter().any(|d| d == "localhost") {
+            names.push("localhost".to_string());
+        }
+
+        let file_stem = names
+            .iter()
+            .find(|d| d.as_str() != "localhost")
+            .cloned()
+            .unwrap_or_else(|| "localhost".to_string())
+            .replace(['/', '\\', ':'], "_");
+
+        let key_path = self.cert_dir.join(format!("{}.key", file_stem));
+        let cert_path = self.cert_dir.join(format!("{}.crt", file_stem));
 
         if key_path.exists() && cert_path.exists() {
             return Ok((key_path, cert_path));
         }
 
-        info!("🔐 Generating self-signed certificate for {}", domain);
+        info!(
+            "🔐 Generating self-signed certificate for {}",
+            names.join(", ")
+        );
 
         let mut cert_params = CertificateParams::default();
         cert_params.is_ca = rcgen::IsCa::NoCa;
 
         let mut distinguished_name = DistinguishedName::new();
-        distinguished_name.push(DnType::CommonName, domain);
+        distinguished_name.push(DnType::CommonName, file_stem.clone());
         distinguished_name.push(DnType::OrganizationName, "CleanServe");
         distinguished_name.push(DnType::CountryName, "XX");
         cert_params.distinguished_name = distinguished_name;
+
+        cert_params.subject_alt_names = names
+            .iter()
+            .map(|name| rcgen::SanType::DnsName(name.clone()))
+            .collect();
 
         let not_before = time::OffsetDateTime::now_utc();
         let not_after = not_before + time::Duration::days(365);

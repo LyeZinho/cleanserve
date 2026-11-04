@@ -1,5 +1,5 @@
 use anyhow::Context;
-use cleanserve_core::{cleanserve_home, PhpDownloader, PhpManager};
+use cleanserve_core::{cleanserve_home, PhpDownloader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -30,8 +30,7 @@ pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Res
         .or_else(|| config.as_ref().map(|c| c.engine.php.clone()))
         .unwrap_or_else(|| DEFAULT_PHP.to_string());
 
-    let managed_php = ensure_php(&php_version).await?;
-    let php_path = resolve_php_for_composer(&managed_php, &php_version)?;
+    let php_path = ensure_composer_php(&php_version).await?;
     let composer_path = ensure_composer().await?;
 
     println!("🎼 Running Composer with PHP {}", php_version);
@@ -72,13 +71,7 @@ pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Res
     Ok(())
 }
 
-async fn ensure_php(version: &str) -> anyhow::Result<PathBuf> {
-    let manager = PhpManager::new().context("Failed to init PHP manager")?;
-    if let Some(path) = manager.get_path(version) {
-        return Ok(path);
-    }
-
-    println!("📦 PHP {} not found locally. Downloading...", version);
+async fn ensure_composer_php(version: &str) -> anyhow::Result<PathBuf> {
     let project_php = Path::new(".cleanserve").join("php");
     let downloader = if project_php.exists() {
         PhpDownloader::new(&project_php).context("Failed to initialize project PHP downloader")?
@@ -86,20 +79,17 @@ async fn ensure_php(version: &str) -> anyhow::Result<PathBuf> {
         PhpDownloader::global().context("Failed to initialize PHP downloader")?
     };
 
-    match downloader.ensure(version).await {
-        Ok(path) => Ok(path),
-        Err(e) => {
-            anyhow::bail!(
-                "PHP {} is not available ({}).\n\
-                 Searched: .cleanserve/php/, ~/.cleanserve/php/, ~/.cleanserve/bin/\n\
-                 Run: cleanserve update --version {}\n\
-                 If you built from source, run: ./scripts/install-local.sh (your `cleanserve --version` should show a git hash, not only 0.3.0)",
-                version,
-                e,
-                version
-            );
-        }
-    }
+    downloader
+        .ensure_composer_capable(version)
+        .await
+        .map_err(|e| {
+            anyhow::anyhow!(
+                "{}\n\
+                 Install build tools (gcc, libxml2, openssl, sqlite, on Arch: `sudo pacman -S base-devel libxml2 openssl sqlite`) \
+                 or set CLEANSERVE_COMPOSER_PHP=/usr/bin/php after `sudo pacman -S php`.",
+                e
+            )
+        })
 }
 
 async fn ensure_composer() -> anyhow::Result<PathBuf> {
@@ -209,75 +199,6 @@ async fn download_composer_phar() -> anyhow::Result<PathBuf> {
 
     println!("✅ Composer downloaded to {}", dest.display());
     Ok(dest)
-}
-
-/// Composer needs these even for `--version`. php-runtimes currently builds
-/// with `--disable-all` and omits several of them.
-const COMPOSER_REQUIRED_EXTS: &[&str] = &[
-    "json",
-    "phar",
-    "hash",
-    "filter",
-    "mbstring",
-    "openssl",
-    "tokenizer",
-    "ctype",
-];
-
-fn resolve_php_for_composer(managed: &Path, php_version: &str) -> anyhow::Result<PathBuf> {
-    if php_has_composer_extensions(managed) {
-        return Ok(managed.to_path_buf());
-    }
-
-    if let Ok(override_path) = std::env::var("CLEANSERVE_COMPOSER_PHP") {
-        let path = PathBuf::from(override_path);
-        if php_has_composer_extensions(&path) {
-            println!("Using CLEANSERVE_COMPOSER_PHP={}", path.display());
-            return Ok(path);
-        }
-    }
-
-    if let Some(system_php) = which("php").filter(|p| php_has_composer_extensions(p)) {
-        println!(
-            "⚠️  CleanServe PHP ({}) is missing Composer extensions (phar, tokenizer, …).",
-            managed.display()
-        );
-        println!(
-            "   Using system PHP {} for this command.",
-            system_php.display()
-        );
-        println!(
-            "   After php-runtimes releases new binaries: cleanserve update --version {}",
-            php_version
-        );
-        return Ok(system_php);
-    }
-
-    let missing = missing_composer_extensions(managed);
-    anyhow::bail!(
-        "This PHP build is missing extensions Composer needs: {}.\n\
-         Install system PHP (e.g. pacman -S php) or set CLEANSERVE_COMPOSER_PHP=/usr/bin/php\n\
-         Long-term: rebuild php-runtimes with phar enabled, then: cleanserve update --version {}",
-        missing.join(", "),
-        php_version
-    )
-}
-
-fn php_has_composer_extensions(php_path: &Path) -> bool {
-    missing_composer_extensions(php_path).is_empty()
-}
-
-fn missing_composer_extensions(php_path: &Path) -> Vec<&'static str> {
-    let output = Command::new(php_path).arg("-m").output();
-    let modules = match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_ascii_lowercase(),
-        _ => return COMPOSER_REQUIRED_EXTS.to_vec(),
-    };
-    COMPOSER_REQUIRED_EXTS
-        .iter()
-        .copied()
-        .filter(|ext| !modules.lines().any(|line| line.trim() == *ext))
-        .collect()
 }
 
 fn prepend_path(dir: &Path) -> std::ffi::OsString {

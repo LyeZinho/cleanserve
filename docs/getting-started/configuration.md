@@ -18,7 +18,15 @@ The `cleanserve.json` file is stored at your project root. Here is an example wi
   "server": {
     "root": "public/",
     "port": 8080,
-    "hot_reload": true
+    "hot_reload": true,
+    "domain_suffix": "serve"
+  },
+  "apps": {
+    "frontend": { "root": "frontend/web", "framework": "yii" },
+    "backend": { "root": "backend/web", "framework": "yii" }
+  },
+  "stack": {
+    "mysql": { "version": "8.0", "enabled": true, "port": 3306 }
   }
 }
 ```
@@ -42,9 +50,46 @@ The `engine` object configures the PHP environment for your project.
 
 The `server` object configures the local development server behavior.
 
-- **`root`** (string, default: "public/"): The document root for the server. Relative to the project root.
+- **`root`** (string, default: "public/"): The document root for the server. Relative to the project root. Used when `apps` is empty and no app is auto-detected.
 - **`port`** (integer, default: 8080): The primary server port.
 - **`hot_reload`** (boolean, default: true): Enables Hot Module Replacement (HMR) for instant browser updates.
+- **`domain_suffix`** (string, default: "serve"): Suffix used for generated app domains (e.g. `frontend.serve`).
+
+### Apps
+
+`apps` is a map of app name to document root. Each app is served by its own PHP worker and routed by hostname.
+
+```json
+"apps": {
+  "frontend": { "root": "frontend/web", "domain": "frontend.serve", "framework": "yii", "router": "index.php" },
+  "backend":  { "root": "backend/web",  "domain": "backend.serve",  "framework": "yii" }
+}
+```
+
+- **`root`** (string, required): Document root relative to the project root.
+- **`domain`** (string, optional): Public hostname. Defaults to `<name>.<domain_suffix>` for multiple apps and `localhost` for a single app.
+- **`framework`** (string, optional): Framework adapter name (`yii`, `laravel`, `symfony`, ...).
+- **`router`** (string, optional): Front-controller script relative to `root`. Defaults to `index.php`.
+
+When `apps` is empty, CleanServe auto-detects Yii2 Advanced (`frontend/web` + `backend/web`), Yii2 Basic (`web/`), Laravel/Symfony (`public/`), or a root `index.php`.
+
+### Stack
+
+`stack` declares Docker services managed by `cleanserve stack`:
+
+```json
+"stack": {
+  "mysql": { "version": "8.0", "enabled": true, "port": 3306 },
+  "redis": { "version": "7.2", "enabled": true }
+}
+```
+
+- **`version`** (string, optional): Image tag.
+- **`enabled`** (boolean, default: true): Start automatically with `cleanserve up`.
+- **`port`** (integer, optional): Host port.
+- **`env`** (object, optional): Extra container environment variables.
+
+The generated compose file is `.cleanserve/stack/docker-compose.yml`; data lives under `.cleanserve/stack/data/`.
 
 > **Note:** CleanServe uses `composer.json` for auto-detection during initialization, but once `cleanserve.json` is created, it becomes the source of truth for your development environment.
 

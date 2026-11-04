@@ -1,5 +1,9 @@
 use anyhow::Context;
-use cleanserve_core::{ensure_writable_dirs, Framework, FrameworkInfo};
+use cleanserve_core::{
+    discover_apps, ensure_writable_dirs, AppConfig, CleanServeConfig, EngineConfig, Framework,
+    FrameworkInfo, ServerConfig,
+};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 pub mod html_pages;
@@ -30,8 +34,11 @@ pub async fn run(
         anyhow::bail!("cleanserve.json already exists. Remove it first.");
     }
 
-    let mut server = cleanserve_core::ServerConfig::default();
-    if framework.framework != Framework::Unknown {
+    let mut server = ServerConfig::default();
+    let discovered = discover_apps(Path::new("."));
+    if let Some(first) = discovered.first() {
+        server.root = root_string(&first.root);
+    } else if framework.framework != Framework::Unknown {
         if let Some(root) = document_root_for(&framework) {
             server.root = root;
         }
@@ -41,9 +48,26 @@ pub async fn run(
         server.root = "./".to_string();
     }
 
-    let config = cleanserve_core::CleanServeConfig {
+    let mut apps = HashMap::new();
+    for app in &discovered {
+        apps.insert(
+            app.name.clone(),
+            AppConfig {
+                root: root_string(&app.root),
+                domain: None,
+                framework: if framework.framework != Framework::Unknown {
+                    Some(framework.framework.to_string().to_lowercase())
+                } else {
+                    None
+                },
+                router: None,
+            },
+        );
+    }
+
+    let config = CleanServeConfig {
         name: project_name.clone(),
-        engine: cleanserve_core::EngineConfig {
+        engine: EngineConfig {
             php: php.clone(),
             extensions: vec![],
             display_errors: true,
@@ -51,6 +75,8 @@ pub async fn run(
         },
         server,
         packages: None,
+        apps,
+        stack: HashMap::new(),
     };
 
     config
@@ -69,6 +95,17 @@ pub async fn run(
                 .unwrap_or_default()
         );
     }
+    if !discovered.is_empty() {
+        let single = discovered.len() == 1;
+        for app in &discovered {
+            let domain = if single {
+                "localhost".to_string()
+            } else {
+                format!("{}.{}", app.name, config.server.domain_suffix)
+            };
+            println!("  • {} -> {} ({})", app.name, domain, root_string(&app.root));
+        }
+    }
 
     let cleanserve_dir = Path::new(".cleanserve");
     let cleanserve_pages_dir = cleanserve_dir.join("pages");
@@ -79,6 +116,7 @@ pub async fn run(
 
     let has_app = Path::new("composer.json").exists()
         || framework.framework != Framework::Unknown
+        || !discovered.is_empty()
         || Path::new("public/index.php").exists();
 
     let public_dir = Path::new("public");
@@ -208,6 +246,17 @@ fn php_constraint_to_version(constraint: &str) -> Option<String> {
     } else {
         Some(detected)
     }
+}
+
+fn root_string(root: &Path) -> String {
+    let mut value = root.to_string_lossy().replace('\\', "/");
+    if value == "." {
+        return "./".to_string();
+    }
+    if !value.ends_with('/') {
+        value.push('/');
+    }
+    value
 }
 
 fn document_root_for(info: &FrameworkInfo) -> Option<String> {

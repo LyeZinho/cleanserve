@@ -11,6 +11,58 @@ pub struct CleanServeConfig {
     pub server: ServerConfig,
     #[serde(default)]
     pub packages: Option<PackagesConfig>,
+    /// Applications served by this project. Empty means auto-detect.
+    #[serde(default)]
+    pub apps: HashMap<String, AppConfig>,
+    /// Docker-backed services managed by `cleanserve stack`.
+    #[serde(default)]
+    pub stack: HashMap<String, StackService>,
+}
+
+/// One served application inside a project (Yii2 frontend/backend, Laravel, ...).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    /// Document root, relative to the project root.
+    pub root: String,
+    /// Public hostname. Defaults to `<name>.<server.domain_suffix>` for
+    /// multi-app projects and `localhost` for single-app projects.
+    #[serde(default)]
+    pub domain: Option<String>,
+    /// Framework adapter name (yii2, laravel, symfony, ...).
+    #[serde(default)]
+    pub framework: Option<String>,
+    /// Optional front-controller/router script, relative to `root`.
+    #[serde(default)]
+    pub router: Option<String>,
+}
+
+/// A Docker service declared in `cleanserve.json` under `stack`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StackService {
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub port: Option<u16>,
+    /// Extra environment variables passed to the container.
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for StackService {
+    fn default() -> Self {
+        Self {
+            version: None,
+            enabled: true,
+            port: None,
+            env: HashMap::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,6 +84,9 @@ pub struct ServerConfig {
     pub port: u16,
     #[serde(default = "default_hot_reload")]
     pub hot_reload: bool,
+    /// Suffix used for generated app domains (e.g. `frontend.<suffix>`).
+    #[serde(default = "default_domain_suffix")]
+    pub domain_suffix: String,
 }
 
 fn default_display_errors() -> bool {
@@ -48,6 +103,10 @@ fn default_port() -> u16 {
 
 fn default_hot_reload() -> bool {
     true
+}
+
+fn default_domain_suffix() -> String {
+    "serve".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +143,7 @@ impl Default for ServerConfig {
             root: default_root(),
             port: default_port(),
             hot_reload: default_hot_reload(),
+            domain_suffix: default_domain_suffix(),
         }
     }
 }

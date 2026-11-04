@@ -11,6 +11,7 @@ pub struct PhpWorker {
     php_path: PathBuf,
     root: PathBuf,
     php_ini: Option<PathBuf>,
+    router: Option<PathBuf>,
     port: u16,
     child: Option<Child>,
 }
@@ -21,6 +22,7 @@ impl PhpWorker {
             php_path,
             root,
             php_ini: None,
+            router: None,
             port: DEFAULT_PHP_PORT,
             child: None,
         }
@@ -28,6 +30,12 @@ impl PhpWorker {
 
     pub fn with_php_ini(mut self, ini_path: PathBuf) -> Self {
         self.php_ini = Some(ini_path);
+        self
+    }
+
+    /// Front controller used for pretty URLs / framework routing.
+    pub fn with_router(mut self, router: PathBuf) -> Self {
+        self.router = Some(router);
         self
     }
 
@@ -61,12 +69,16 @@ impl PhpWorker {
         if let Some(ini) = &self.php_ini {
             cmd.arg("-c").arg(ini);
         }
-        cmd.args([
-            "-S",
-            &format!("127.0.0.1:{}", port),
-            "-t",
-            self.root.to_str().unwrap_or("."),
-        ]);
+        let mut args = vec![
+            "-S".to_string(),
+            format!("127.0.0.1:{}", port),
+            "-t".to_string(),
+            self.root.to_string_lossy().into_owned(),
+        ];
+        if let Some(router) = &self.router {
+            args.push(router.to_string_lossy().into_owned());
+        }
+        cmd.args(args);
 
         let mut child = cmd
             .stdout(Stdio::piped())

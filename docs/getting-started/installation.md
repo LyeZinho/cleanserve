@@ -6,10 +6,12 @@ CleanServe is a zero-config PHP development server written in Rust. It simplifie
 
 CleanServe runs on Linux, macOS, and Windows. Depending on your installation method, you need the following tools:
 
-- **Quick Install:** `curl` and `unzip`.
-- **Building from Source:** Rust toolchain (Cargo 1.70+).
+- **Quick Install:** `curl`, `unzip`, **Docker**, and the **Docker Compose plugin**.
+- **Building from Source:** Rust toolchain (Cargo 1.70+) and Docker (for `cleanserve stack`).
 - **PHP Storage:** PHP binaries are stored in `~/.cleanserve/php/php-{version}/`.
 - **Certificates:** Local TLS certificates are stored in `~/.cleanserve/certs/`.
+
+Docker is required by the installer because CleanServe manages databases and other development services through Docker Compose. For CI or environments without Docker, set `CLEANSERVE_SKIP_DOCKER_CHECK=1` when running `install.sh`.
 
 ## Quick Install
 

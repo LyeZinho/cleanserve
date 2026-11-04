@@ -1,6 +1,9 @@
 pub mod config;
+pub mod local_dns;
 pub mod php_manager;
 pub mod php_downloader;
+pub mod php_capabilities;
+pub mod php_local_build;
 pub mod version_manifest;
 pub mod php_worker;
 pub mod extension_manager;
@@ -23,9 +26,13 @@ pub mod auto_updater;
 pub mod url_validator;
 
 pub use cleanserve_shared::{CleanServeError, Result};
-pub use config::{CleanServeConfig, EngineConfig, ServerConfig};
+pub use config::{AppConfig, CleanServeConfig, EngineConfig, ServerConfig, StackService};
+pub use framework::{discover_apps, resolve_apps, AppInfo, ServedApp};
 pub use php_manager::{cleanserve_home, find_php_binary, PhpManager};
 pub use php_downloader::PhpDownloader;
+pub use php_capabilities::{
+    is_composer_capable, missing_composer_extensions, COMPOSER_REQUIRED_EXTENSIONS,
+};
 pub use version_manifest::{VersionManifest, PhpVersion, PlatformBinary};
 pub use php_worker::PhpWorker;
 pub use extension_manager::ExtensionManager;

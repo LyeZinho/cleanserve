@@ -6,5 +6,7 @@ pub mod list;
 pub mod update;
 pub mod composer;
 pub mod php;
+pub mod setupdomain;
+pub mod stack;
 pub mod project_env;
 pub mod package;

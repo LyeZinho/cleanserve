@@ -3,6 +3,7 @@
 //! Automatically detects PHP frameworks (Laravel, Symfony, etc.)
 //! and adjusts configuration accordingly. RF-P04
 
+use crate::config::CleanServeConfig;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -156,10 +157,14 @@ impl FrameworkInfo {
     }
 
     fn yii(root: &Path) -> Self {
-        let entry_point = if root.join("public/index.php").exists() {
-            root.join("public/index.php")
+        let entry_point = if root.join("frontend/web/index.php").exists() {
+            root.join("frontend/web/index.php")
+        } else if root.join("backend/web/index.php").exists() {
+            root.join("backend/web/index.php")
         } else if root.join("web/index.php").exists() {
             root.join("web/index.php")
+        } else if root.join("public/index.php").exists() {
+            root.join("public/index.php")
         } else {
             root.join("index.php")
         };
@@ -169,6 +174,11 @@ impl FrameworkInfo {
             version: Self::detect_yii_version(root),
             writable_dirs: vec![
                 root.join("runtime"),
+                root.join("console/runtime"),
+                root.join("frontend/runtime"),
+                root.join("frontend/web/assets"),
+                root.join("backend/runtime"),
+                root.join("backend/web/assets"),
                 root.join("public/assets"),
                 root.join("web/assets"),
             ],
@@ -351,6 +361,136 @@ impl FrameworkInfo {
     }
 }
 
+/// An application discovered in a project (one per document root).
+#[derive(Debug, Clone)]
+pub struct AppInfo {
+    pub name: String,
+    /// Document root relative to the project root.
+    pub root: PathBuf,
+    pub entry_point: PathBuf,
+}
+
+/// An application ready to be served, with its public hostname.
+#[derive(Debug, Clone)]
+pub struct ServedApp {
+    pub name: String,
+    pub root: PathBuf,
+    pub entry_point: PathBuf,
+    pub domain: String,
+    /// Front controller passed to PHP's built-in server, when present.
+    pub router: Option<PathBuf>,
+}
+
+/// Discover the applications of a project.
+///
+/// Yii2 Advanced exposes two independent apps (`frontend/web` and
+/// `backend/web`); Yii2 Basic and generic projects expose one. The order is
+/// deterministic so the first app can be used as the default document root.
+pub fn discover_apps(project_root: &Path) -> Vec<AppInfo> {
+    let frontend = project_root.join("frontend/web/index.php");
+    let backend = project_root.join("backend/web/index.php");
+    if frontend.is_file() && backend.is_file() {
+        return vec![
+            AppInfo {
+                name: "frontend".to_string(),
+                root: PathBuf::from("frontend/web"),
+                entry_point: frontend,
+            },
+            AppInfo {
+                name: "backend".to_string(),
+                root: PathBuf::from("backend/web"),
+                entry_point: backend,
+            },
+        ];
+    }
+
+    let candidates: &[(&str, &str)] = &[
+        ("app", "web"),
+        ("app", "public"),
+        ("app", "."),
+    ];
+    for (name, root) in candidates {
+        let dir = project_root.join(root);
+        let entry = dir.join("index.php");
+        if entry.is_file() {
+            return vec![AppInfo {
+                name: (*name).to_string(),
+                root: PathBuf::from(*root),
+                entry_point: entry,
+            }];
+        }
+    }
+
+    Vec::new()
+}
+
+/// Merge configured apps with auto-discovery.
+///
+/// `cleanserve.json` wins when it has an `apps` map. Otherwise apps are
+/// detected and named dynamically. A single app is served on `localhost`;
+/// multi-app projects get `<name>.<domain_suffix>`.
+pub fn resolve_apps(config: &CleanServeConfig, project_root: &Path) -> Vec<ServedApp> {
+    let suffix = config.server.domain_suffix.trim_start_matches('.');
+    let mut apps = Vec::new();
+
+    if !config.apps.is_empty() {
+        let mut names: Vec<&String> = config.apps.keys().collect();
+        names.sort();
+        let single = names.len() == 1;
+        for name in names {
+            let app = &config.apps[name];
+            let root = project_root.join(&app.root);
+            let router_rel = app.router.as_deref().unwrap_or("index.php");
+            let entry = root.join(router_rel);
+            let domain = app.domain.clone().unwrap_or_else(|| {
+                if single {
+                    "localhost".to_string()
+                } else {
+                    format!("{}.{}", name, suffix)
+                }
+            });
+            apps.push(ServedApp {
+                name: name.clone(),
+                root,
+                router: entry.is_file().then_some(entry.clone()),
+                entry_point: entry,
+                domain,
+            });
+        }
+        return apps;
+    }
+
+    let discovered = discover_apps(project_root);
+    if discovered.is_empty() {
+        let root = project_root.join(config.server.root.trim_start_matches("./"));
+        let entry = root.join("index.php");
+        return vec![ServedApp {
+            name: "app".to_string(),
+            router: entry.is_file().then_some(entry.clone()),
+            entry_point: entry,
+            root,
+            domain: "localhost".to_string(),
+        }];
+    }
+
+    let single = discovered.len() == 1;
+    for app in discovered {
+        let domain = if single {
+            "localhost".to_string()
+        } else {
+            format!("{}.{}", app.name, suffix)
+        };
+        apps.push(ServedApp {
+            name: app.name,
+            router: app.entry_point.is_file().then_some(app.entry_point.clone()),
+            entry_point: app.entry_point,
+            root: app.root,
+            domain,
+        });
+    }
+    apps
+}
+
 /// Ensure writable directories exist with correct permissions
 pub fn ensure_writable_dirs(info: &FrameworkInfo) -> Vec<std::io::Result<()>> {
     info.writable_dirs
@@ -384,5 +524,91 @@ mod tests {
     fn test_framework_display() {
         assert_eq!(Framework::Laravel.to_string(), "Laravel");
         assert_eq!(Framework::Unknown.to_string(), "Unknown");
+    }
+
+    fn temp_project(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "cleanserve-apps-{}-{}",
+            name,
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn discovers_yii2_advanced_apps() {
+        let root = temp_project("advanced");
+        std::fs::create_dir_all(root.join("frontend/web")).unwrap();
+        std::fs::create_dir_all(root.join("backend/web")).unwrap();
+        std::fs::write(root.join("frontend/web/index.php"), "<?php").unwrap();
+        std::fs::write(root.join("backend/web/index.php"), "<?php").unwrap();
+
+        let apps = discover_apps(&root);
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[0].name, "frontend");
+        assert_eq!(apps[0].root, PathBuf::from("frontend/web"));
+        assert_eq!(apps[1].name, "backend");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_apps_names_multi_app_domains() {
+        let root = temp_project("domains");
+        std::fs::create_dir_all(root.join("frontend/web")).unwrap();
+        std::fs::create_dir_all(root.join("backend/web")).unwrap();
+        std::fs::write(root.join("frontend/web/index.php"), "<?php").unwrap();
+        std::fs::write(root.join("backend/web/index.php"), "<?php").unwrap();
+
+        let config = CleanServeConfig {
+            name: "demo".to_string(),
+            engine: crate::EngineConfig {
+                php: "8.4".to_string(),
+                extensions: vec![],
+                display_errors: true,
+                memory_limit: None,
+            },
+            server: crate::ServerConfig::default(),
+            packages: None,
+            apps: Default::default(),
+            stack: Default::default(),
+        };
+
+        let apps = resolve_apps(&config, &root);
+        assert_eq!(apps.len(), 2);
+        assert_eq!(apps[0].domain, "frontend.serve");
+        assert_eq!(apps[1].domain, "backend.serve");
+        assert!(apps[0].router.is_some());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_single_app_uses_localhost() {
+        let root = temp_project("single");
+        std::fs::create_dir_all(root.join("public")).unwrap();
+        std::fs::write(root.join("public/index.php"), "<?php").unwrap();
+
+        let config = CleanServeConfig {
+            name: "demo".to_string(),
+            engine: crate::EngineConfig {
+                php: "8.4".to_string(),
+                extensions: vec![],
+                display_errors: true,
+                memory_limit: None,
+            },
+            server: crate::ServerConfig::default(),
+            packages: None,
+            apps: Default::default(),
+            stack: Default::default(),
+        };
+
+        let apps = resolve_apps(&config, &root);
+        assert_eq!(apps.len(), 1);
+        assert_eq!(apps[0].domain, "localhost");
+
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

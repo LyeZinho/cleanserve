@@ -12,6 +12,19 @@ cleanserve init [--name NAME] [--php VERSION]
 
 This command scans your `composer.json` (if present) to generate a `cleanserve.json` configuration file. It reads the package name and `require.php` constraint, and detects Laravel, Symfony, Yii, WordPress, Drupal, and CodeIgniter for the document root.
 
+For projects with several apps (Yii2 Advanced), `init` writes an `apps` map instead of creating a synthetic `public/` directory:
+
+```json
+{
+  "apps": {
+    "frontend": { "root": "frontend/web", "framework": "yii" },
+    "backend":  { "root": "backend/web",  "framework": "yii" }
+  }
+}
+```
+
+When `apps` is empty, CleanServe auto-detects the layout on every `up`.
+
 **Arguments:**
 - `--name`: The project name. Defaults to the name in `composer.json` or the directory name.
 - `--php`: The PHP version to use. Defaults to a version compatible with `require.php`, or **8.4**.
@@ -25,6 +38,15 @@ cleanserve up [--port PORT]
 ```
 
 By default, the server listens on port **8080**. It also starts a Hot Module Replacement (HMR) WebSocket server on the next available port (default **8081**).
+
+`up` serves every app found in the project. Yii2 Advanced gets two apps, `frontend` and `backend`, each with its own PHP worker; requests are routed by hostname:
+
+```text
+https://frontend.serve -> frontend/web
+https://backend.serve  -> backend/web
+```
+
+Single-app and vanilla projects keep using `https://localhost`.
 
 **Arguments:**
 - `--port`: The port to listen on.
@@ -100,3 +122,45 @@ Runs the managed PHP CLI with the same binary the server uses.
 cleanserve php -v
 cleanserve php artisan migrate
 ```
+
+## setupdomain
+
+Configures local development domains for the apps in `cleanserve.json`.
+
+```bash
+cleanserve setupdomain
+cleanserve setupdomain --remove
+```
+
+The command uses `server.domain_suffix` (default `serve`) and routes `*.serve` to a small DNS responder started by `cleanserve up`. With `systemd-resolved`, it writes a drop-in and asks for sudo once. On systems without it, a managed block is written to `/etc/hosts`.
+
+Remove everything created by the command with:
+
+```bash
+cleanserve setupdomain --remove
+```
+
+If `server.port` is `443`, the command also grants the binary `CAP_NET_BIND_SERVICE` so it can bind the privileged port.
+
+## stack
+
+Manages Docker-backed development services such as MySQL, Redis, and Mailpit.
+
+```bash
+cleanserve stack add mysql
+cleanserve stack add redis 7.2
+cleanserve stack list
+cleanserve stack up
+cleanserve stack down
+cleanserve stack status
+cleanserve stack logs mysql
+cleanserve stack remove mysql
+```
+
+Services are stored in `cleanserve.json` and the generated compose file lives in `.cleanserve/stack/docker-compose.yml`. Data is kept under `.cleanserve/stack/data/<service>/`.
+
+`cleanserve up` automatically starts the services marked as `enabled`.
+
+> **Docker is required.** The installer checks for Docker and the Compose plugin before installing CleanServe. Set `CLEANSERVE_SKIP_DOCKER_CHECK=1` to bypass the check in CI.
+
+Available services: `mysql`, `mariadb`, `postgres`, `redis`, `mailpit`, `phpmyadmin`, `adminer`.

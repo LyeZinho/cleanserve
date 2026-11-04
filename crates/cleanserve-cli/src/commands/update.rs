@@ -1,5 +1,5 @@
 use anyhow::Context;
-use cleanserve_core::{PhpDownloader, PhpManager};
+use cleanserve_core::{is_composer_capable, PhpDownloader, PhpManager};
 use std::path::Path;
 
 pub async fn run_php_update(version: Option<String>) -> anyhow::Result<()> {
@@ -17,28 +17,38 @@ pub async fn run_php_update(version: Option<String>) -> anyhow::Result<()> {
 
     let manager = PhpManager::new().context("Failed to init PHP manager")?;
     if let Some(path) = manager.get_path(&version) {
+        if is_composer_capable(&path) {
+            println!(
+                "✅ PHP {} is already installed at {}",
+                version,
+                path.display()
+            );
+            return Ok(());
+        }
         println!(
-            "✅ PHP {} is already installed at {}",
+            "⚠️  PHP {} at {} is missing Composer extensions — upgrading runtime…",
             version,
             path.display()
         );
-        return Ok(());
+        manager
+            .remove_matching_installs(&version)
+            .context("Failed to remove outdated PHP install")?;
     }
 
-    println!("📦 Downloading PHP {} to ~/.cleanserve/php/...", version);
+    println!("📦 Installing PHP {} to ~/.cleanserve/php/...", version);
 
     let downloader =
         PhpDownloader::global().context("Failed to initialize PHP downloader")?;
 
-    match downloader.download(&version).await {
+    match downloader.ensure_composer_capable(&version).await {
         Ok(path) => {
-            println!("✅ PHP {} downloaded successfully!", version);
+            println!("✅ PHP {} ready for CleanServe and Composer", version);
             println!("   Binary: {}", path.display());
             println!();
             println!("Run 'cleanserve up' to start the server.");
         }
         Err(e) => {
-            anyhow::bail!("Failed to download PHP {}: {}", version, e);
+            anyhow::bail!("Failed to install PHP {}: {}", version, e);
         }
     }
 

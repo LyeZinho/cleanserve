@@ -103,6 +103,29 @@ impl PhpManager {
         let path = self.get_path(query)?;
         version_from_binary_path(&path).or_else(|| Some(query.to_string()))
     }
+
+    /// Remove installed trees matching `version` (minor or exact) from all search dirs.
+    pub fn remove_matching_installs(&self, version: &str) -> Result<()> {
+        for dir in &self.search_dirs {
+            let entries = match std::fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            for entry in entries.flatten() {
+                let name = match entry.file_name().into_string() {
+                    Ok(n) => n,
+                    Err(_) => continue,
+                };
+                let Some(installed) = name.strip_prefix("php-") else {
+                    continue;
+                };
+                if version_matches(installed, version) {
+                    let _ = std::fs::remove_dir_all(entry.path());
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 pub fn cleanserve_home() -> Result<PathBuf> {

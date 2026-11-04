@@ -84,9 +84,18 @@ const HMR_CLIENT_SCRIPT: &str = r#"
 })();
 "#;
 
+/// A hostname routed to its own document root and PHP worker.
+#[derive(Clone, Debug)]
+pub struct AppRoute {
+    pub domain: String,
+    pub root: String,
+    pub php_backend_port: u16,
+}
+
 pub struct ProxyServer {
     port: u16,
     root: Arc<String>,
+    routes: Arc<Vec<AppRoute>>,
     hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
     request_validator: Arc<RequestValidator>,
@@ -104,6 +113,7 @@ impl ProxyServer {
         Self {
             port,
             root: Arc::new(root),
+            routes: Arc::new(Vec::new()),
             hmr_state: Arc::new(RwLock::new(HmrState::new())),
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
@@ -122,6 +132,7 @@ impl ProxyServer {
         Self {
             port,
             root: Arc::new(root),
+            routes: Arc::new(Vec::new()),
             hmr_state,
             rate_limiter: Arc::new(RateLimiter::new(1000, 60)),
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
@@ -143,6 +154,12 @@ impl ProxyServer {
 
     pub fn with_php_backend(mut self, port: u16) -> Self {
         self.php_backend_port = port;
+        self
+    }
+
+    /// Route requests by Host header to several apps.
+    pub fn with_routes(mut self, routes: Vec<AppRoute>) -> Self {
+        self.routes = Arc::new(routes);
         self
     }
 
@@ -185,6 +202,7 @@ impl ProxyServer {
             match listener.accept().await {
                 Ok((stream, remote_addr)) => {
                     let root = Arc::clone(&self.root);
+                    let routes = Arc::clone(&self.routes);
                     let hmr_state = Arc::clone(&self.hmr_state);
                     let rate_limiter = Arc::clone(&self.rate_limiter);
                     let request_validator = Arc::clone(&self.request_validator);
@@ -202,6 +220,7 @@ impl ProxyServer {
                                     Self::serve_http1(
                                         TokioIo::new(tls_stream),
                                         root,
+                                        routes,
                                         hmr_state,
                                         rate_limiter,
                                         request_validator,
@@ -221,6 +240,7 @@ impl ProxyServer {
                             Self::serve_http1(
                                 TokioIo::new(stream),
                                 root,
+                                routes,
                                 hmr_state,
                                 rate_limiter,
                                 request_validator,
@@ -244,6 +264,7 @@ impl ProxyServer {
     async fn serve_http1<I>(
         io: TokioIo<I>,
         root: Arc<String>,
+        routes: Arc<Vec<AppRoute>>,
         hmr_state: Arc<RwLock<HmrState>>,
         rate_limiter: Arc<RateLimiter>,
         request_validator: Arc<RequestValidator>,
@@ -256,7 +277,25 @@ impl ProxyServer {
         I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
     {
         let service = service_fn(move |req| {
-            let root = Arc::clone(&root);
+            let host = req
+                .headers()
+                .get(hyper::header::HOST)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .split(':')
+                .next()
+                .unwrap_or("")
+                .to_ascii_lowercase();
+
+            let matched = routes
+                .iter()
+                .find(|route| route.domain.eq_ignore_ascii_case(&host));
+
+            let (request_root, request_php_port) = match matched {
+                Some(route) => (Arc::new(route.root.clone()), route.php_backend_port),
+                None => (Arc::clone(&root), php_backend_port),
+            };
+
             let hmr_state = Arc::clone(&hmr_state);
             let rate_limiter = Arc::clone(&rate_limiter);
             let request_validator = Arc::clone(&request_validator);
@@ -264,7 +303,7 @@ impl ProxyServer {
             let not_found_html = Arc::clone(&not_found_html);
             handle_request(
                 req,
-                root,
+                request_root,
                 hmr_state,
                 rate_limiter,
                 request_validator,
@@ -272,7 +311,7 @@ impl ProxyServer {
                 remote_addr,
                 not_found_html,
                 security_headers.clone(),
-                php_backend_port,
+                request_php_port,
             )
         });
         if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
@@ -503,24 +542,27 @@ async fn handle_request(
 
         let file_path = PathBuf::from(root.as_str()).join(request_path.trim_start_matches('/'));
 
-        if let Some(ext) = file_path.extension() {
-            if ext == "php" {
-                match forward_to_php_worker(req, &request_path, php_backend_port).await {
-                    Ok(response) => {
-                        slowloris_protection.mark_request_complete(remote_addr);
-                        return Ok(response);
-                    }
-                    Err(e) => {
-                        error!("PHP worker error: {}", e);
-                        return Ok(Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header("Content-Type", "text/html")
-                            .body(Full::new(Bytes::from(format!(
-                                "<h1>PHP Error</h1><p>{}</p>",
-                                e
-                            ))))
-                            .expect("valid 500 response"));
-                    }
+        let is_php = file_path
+            .extension()
+            .is_some_and(|ext| ext == "php");
+        let needs_front_controller = !file_path.is_file();
+
+        if is_php || needs_front_controller {
+            match forward_to_php_worker(req, &request_path, php_backend_port).await {
+                Ok(response) => {
+                    slowloris_protection.mark_request_complete(remote_addr);
+                    return Ok(response);
+                }
+                Err(e) => {
+                    error!("PHP worker error: {}", e);
+                    return Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "text/html")
+                        .body(Full::new(Bytes::from(format!(
+                            "<h1>PHP Error</h1><p>{}</p>",
+                            e
+                        ))))
+                        .expect("valid 500 response"));
                 }
             }
         }
@@ -627,13 +669,15 @@ async fn forward_to_php_worker(
         .method(method)
         .uri(&php_url);
 
-    // Copy relevant headers
+    // Preserve the public Host so frameworks generate correct absolute URLs.
     for (key, value) in headers.iter() {
-        if !key.as_str().starts_with("host") {
-            php_req = php_req.header(key, value);
-        }
+        php_req = php_req.header(key, value);
     }
-    php_req = php_req.header("Host", &php_host);
+    php_req = php_req.header("X-Forwarded-Host", headers
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or(&php_host));
+    php_req = php_req.header("X-Forwarded-Proto", "https");
 
     let php_req = php_req.body(http_body_util::Full::new(body_bytes))?;
 
