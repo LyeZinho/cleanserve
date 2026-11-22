@@ -13,6 +13,8 @@ anyhow.workspace = true
 thiserror.workspace = true
 dirs = "5"
 zip = "2"
+flate2 = "1"
+tar = "0.4"
 url.workspace = true
 
 # SSL and worker dependencies

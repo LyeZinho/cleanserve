@@ -170,6 +170,20 @@ impl VersionManifest {
             .max_by(|a, b| version_cmp(&a.version, &b.version))
     }
 
+    /// Resolve a requested version to an installable manifest entry.
+    /// Falls back to the newest build that satisfies the minimum (e.g. `8.2` → `8.3.30` when 8.2 is EOL).
+    pub fn resolve_version(&self, query: &str) -> Option<&PhpVersion> {
+        if let Some(v) = self.find_version(query) {
+            return Some(v);
+        }
+
+        let min = minimum_version_triple(query);
+        self.versions
+            .iter()
+            .filter(|v| version_at_least(&v.version, &min))
+            .max_by(|a, b| version_cmp(&a.version, &b.version))
+    }
+
     /// Get platform binary for a resolved version.
     ///
     /// Accepts aliases so `"linux"` matches `"linux-x64"` and vice versa.
@@ -192,10 +206,73 @@ impl VersionManifest {
 
 /// Compare semver-like version strings (e.g., "8.4.19" vs "8.4.2")
 pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
-    let parse = |s: &str| -> Vec<u32> {
-        s.split('.').filter_map(|p| p.parse().ok()).collect()
-    };
-    parse(a).cmp(&parse(b))
+    parse_version_parts(a).cmp(&parse_version_parts(b))
+}
+
+fn parse_version_parts(s: &str) -> Vec<u32> {
+    s.split('.').filter_map(|p| p.parse().ok()).collect()
+}
+
+fn minimum_version_triple(query: &str) -> Vec<u32> {
+    let parts = parse_version_parts(query);
+    match parts.len() {
+        0 => vec![8, 0, 0],
+        1 => vec![parts[0], 0, 0],
+        2 => vec![parts[0], parts[1], 0],
+        _ => parts,
+    }
+}
+
+fn version_at_least(version: &str, minimum: &[u32]) -> bool {
+    version_cmp(version, &format_version_triple(minimum)) != std::cmp::Ordering::Less
+}
+
+fn format_version_triple(parts: &[u32]) -> String {
+    let major = parts.first().copied().unwrap_or(0);
+    let minor = parts.get(1).copied().unwrap_or(0);
+    let patch = parts.get(2).copied().unwrap_or(0);
+    format!("{}.{}.{}", major, minor, patch)
+}
+
+#[cfg(test)]
+mod version_resolve_tests {
+    use super::*;
+
+    fn sample_manifest() -> VersionManifest {
+        VersionManifest {
+            schema_version: "1".into(),
+            updated_at: "".into(),
+            repository: "".into(),
+            versions: vec![
+                PhpVersion {
+                    version: "8.4.19".into(),
+                    tag: "".into(),
+                    published_at: "".into(),
+                    html_url: "".into(),
+                    platforms: vec![],
+                },
+                PhpVersion {
+                    version: "8.3.30".into(),
+                    tag: "".into(),
+                    published_at: "".into(),
+                    html_url: "".into(),
+                    platforms: vec![],
+                },
+            ],
+        }
+    }
+
+    #[test]
+    fn resolve_minor_line() {
+        let m = sample_manifest();
+        assert_eq!(m.resolve_version("8.4").unwrap().version, "8.4.19");
+    }
+
+    #[test]
+    fn resolve_eol_minor_to_newer_compatible() {
+        let m = sample_manifest();
+        assert_eq!(m.resolve_version("8.2").unwrap().version, "8.4.19");
+    }
 }
 
 fn platform_matches(manifest_platform: &str, requested: &str) -> bool {

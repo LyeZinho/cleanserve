@@ -1,20 +1,25 @@
 use anyhow::Context;
 use cleanserve_core::{
-    ensure_writable_dirs, find_server_ports, prepare_project_php_ini, FrameworkInfo, PhpDownloader,
-    PhpManager, PhpWorker, SslManager,
+    ensure_writable_dirs, find_server_ports, prepare_project_php_ini, resolve_dev_php, Framework,
+    FrameworkInfo, PhpDownloader, PhpManager, PhpWorker, ProjectLayout, RuntimeTelemetry,
+    SslManager,
 };
+use cleanserve_proxy::{ProxyServer, HmrEvent, HmrState};
+use cleanserve_watcher::{FileWatcher, FileEvent};
 
 use super::project_env::ensure_document_root;
-use cleanserve_proxy::{HmrEvent, HmrState, ProxyServer};
-use cleanserve_watcher::{FileEvent, FileWatcher};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{error, info};
+use tracing::info;
 
+/// First port tried for the PHP built-in server (the next free one is used if busy).
 const PHP_BACKEND_PORT: u16 = 9000;
 
-pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
+pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Result<()> {
+    let project_root = std::env::current_dir().context("Cannot read current directory")?;
+
     let config_path = Path::new("cleanserve.json");
     if !config_path.exists() {
         anyhow::bail!("No cleanserve.json found. Run 'cleanserve init' first.");
@@ -23,51 +28,79 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     let config = cleanserve_core::CleanServeConfig::load(config_path)
         .context("Failed to load config")?;
 
-    let preferred_port = port.unwrap_or(config.server.port);
-    let root = config.server.root.clone();
-    let hot_reload = config.server.hot_reload;
-    let php_version = &config.engine.php;
-    let project_root = std::env::current_dir().context("Failed to get project directory")?;
+    let _pid_guard = super::pidfile::PidGuard::acquire(&project_root)?;
 
-    let (server_port, hmr_port) = find_server_ports(preferred_port, hot_reload).ok_or_else(|| {
+    let preferred_port = port.unwrap_or(config.server.port);
+    let hot_reload = config.server.hot_reload;
+    let php_version = config.engine.php.clone();
+    let use_tls = config.server.tls && !http_only;
+
+    // The hot-reload WebSocket always listens on `port + 1`, so both ports must be free.
+    let (server_port, hmr_port) = find_server_ports(preferred_port, true).ok_or_else(|| {
         anyhow::anyhow!(
-            "No free ports near {} (need {} consecutive port(s)). Stop the other process or use --port.",
-            preferred_port,
-            if hot_reload { 2 } else { 1 }
+            "No free ports near {} (need 2 consecutive ports). Stop the other process or use `cleanserve up --port <PORT>`.",
+            preferred_port
         )
     })?;
 
+    let telemetry = Arc::new(RuntimeTelemetry::new());
+    telemetry.push_log("Starting CleanServe...");
     if server_port != preferred_port {
-        println!(
-            "⚠️  Port {} is in use — using https://localhost:{} instead",
-            preferred_port,
-            server_port
-        );
+        telemetry.push_log(format!(
+            "Port {} is in use, using {} instead",
+            preferred_port, server_port
+        ));
     }
 
-    println!("\n🌀 CleanServe v0.3.0 starting...\n");
+    let layout = ProjectLayout::detect(&project_root);
+
+    let mut root = config.server.root.clone();
+    if Path::new("composer.json").exists() {
+        let detected = layout.document_root_for_config(&project_root);
+        let detected_abs = project_root.join(detected.trim_end_matches('/'));
+        if detected != root && detected_abs.exists() {
+            telemetry.push_log(format!(
+                "Document root {} (cleanserve.json had {})",
+                detected,
+                root
+            ));
+            root = detected;
+        } else if layout.framework == Framework::Yii2 && !detected_abs.exists() {
+            telemetry.push_log(
+                "Yii2: run `cleanserve php init` to create frontend/web/index.php".to_string(),
+            );
+        }
+    }
+
+    // ---- PHP -------------------------------------------------------------------------------
 
     let manager = PhpManager::new().context("Failed to init PHP manager")?;
-    let php_path = if let Some(path) = manager.get_path(php_version) {
+    let managed_php = if let Some(path) = manager.get_path(&php_version) {
         info!("Using PHP: {}", path.display());
         path
     } else {
         println!("📦 Downloading PHP {}...", php_version);
-        let downloader =
-            PhpDownloader::global().context("Failed to initialize PHP downloader")?;
-        downloader
-            .ensure(php_version)
+        PhpDownloader::global()
+            .context("Failed to initialize PHP downloader")?
+            .ensure(&php_version)
             .await
             .context("Failed to download PHP")?
     };
-
-    let resolved = manager
-        .resolve_installed_version(php_version)
+    let resolved_version = manager
+        .resolve_installed_version(&php_version)
         .unwrap_or_else(|| php_version.clone());
-    println!("📦 Using PHP {} (NTS)", resolved);
 
-    let framework = FrameworkInfo::detect(&project_root);
-    for result in ensure_writable_dirs(&framework) {
+    let dev_php = resolve_dev_php(&managed_php, &php_version);
+    let php_path = dev_php.path;
+    if !dev_php.missing_modules.is_empty() {
+        telemetry.push_log(format!(
+            "PHP is missing modules: {} (some frameworks need them)",
+            dev_php.missing_modules.join(", ")
+        ));
+    }
+
+    let framework_info = FrameworkInfo::detect(&project_root);
+    for result in ensure_writable_dirs(&framework_info) {
         if let Err(e) = result {
             info!("Could not prepare framework directory: {}", e);
         }
@@ -76,90 +109,111 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     let php_runtime = prepare_project_php_ini(
         &project_root,
         &php_path,
-        &resolved,
+        &resolved_version,
         &config.engine,
-        &framework,
+        &framework_info,
     )
     .context("Failed to write project php.ini")?;
-    println!("📝 PHP config: {}", php_runtime.ini_path.display());
+
+    if Path::new("composer.json").exists() && !Path::new("vendor/autoload.php").exists() {
+        telemetry.push_log("vendor/ missing — run `cleanserve composer install`");
+    }
+
+    let document_root = ensure_document_root(&project_root, &root, &config.name, &resolved_version)?;
+    let _ = cleanserve_core::ensure_dev_router(&project_root, &document_root);
+    let router = layout
+        .router_script
+        .clone()
+        .filter(|p| p.exists());
 
     let hmr_state = Arc::new(RwLock::new(HmrState::new()));
 
-    let php_root = ensure_document_root(
-        &project_root,
-        &root,
-        &config.name,
-        &resolved,
-    )?;
-    let mut php_worker =
-        PhpWorker::new(php_path, php_root).with_php_ini(php_runtime.ini_path);
+    let php_log = project_root.join(".cleanserve").join("php-server.log");
+    let _ = std::fs::remove_file(&php_log);
+    let worker = if let Some(router) = router {
+        PhpWorker::with_router(php_path.clone(), document_root.clone(), router)
+    } else {
+        PhpWorker::new(php_path.clone(), document_root.clone())
+    };
+    let mut php_worker = worker
+        .with_php_ini(php_runtime.ini_path)
+        .with_log_file(php_log.clone());
     let php_backend_port = php_worker
         .start_on_port(PHP_BACKEND_PORT)
         .context("Failed to start PHP worker")?;
-    if php_backend_port != PHP_BACKEND_PORT {
-        println!(
-            "⚠️  PHP port {} in use — worker listening on {}",
-            PHP_BACKEND_PORT,
-            php_backend_port
-        );
-    }
-    println!("🔧 PHP worker started (127.0.0.1:{})", php_backend_port);
+    telemetry.push_log(format!(
+        "PHP {} worker on 127.0.0.1:{} (log: {})",
+        resolved_version,
+        php_backend_port,
+        ".cleanserve/php-server.log"
+    ));
 
-    if Path::new("composer.json").exists() {
-        if Path::new("vendor/autoload.php").exists() {
-            println!("🎼 Composer dependencies ready");
+    // ---- Proxy -----------------------------------------------------------------------------
+
+    let tls_material: Option<(String, String)> = if use_tls {
+        let ssl = SslManager::new().context("Failed to init SSL")?;
+        let (key_path, cert_path) = ssl
+            .get_or_create_cert("localhost")
+            .context("Failed to prepare TLS certificate")?;
+        telemetry.push_log("TLS enabled (self-signed localhost cert — accept once in the browser)");
+        Some((cert_path.to_string_lossy().into_owned(), key_path.to_string_lossy().into_owned()))
+    } else {
+        telemetry.push_log("HTTP only — use https:// only when server.tls is true".to_string());
+        None
+    };
+
+    let proxy = ProxyServer::new_with_hmr_and_telemetry(
+        server_port,
+        root.clone(),
+        hmr_state.clone(),
+        Some(telemetry.clone()),
+    )
+    .with_php_backend(php_backend_port);
+
+    let proxy_tls = tls_material.clone();
+    let proxy_handle = tokio::spawn(async move {
+        if let Some((cert, key)) = proxy_tls {
+            proxy.start_https(&cert, &key).await
         } else {
-            println!("⚠️  vendor/ missing — run 'cleanserve composer install'");
+            proxy.start().await
         }
-    }
-
-    let ssl = SslManager::new().context("Failed to init SSL manager")?;
-    let (key_path, cert_path) = ssl
-        .get_or_create_cert("localhost")
-        .context("Failed to prepare TLS certificate")?;
-    println!(
-        "🔒 TLS certificate: {} (localhost)",
-        cert_path.display()
-    );
-
-    let proxy = ProxyServer::new_with_hmr(server_port, root.clone(), hmr_state.clone())
-        .with_tls(cert_path, key_path)
-        .with_php_backend(php_backend_port);
-
-    let proxy_handle = tokio::spawn(async move { proxy.start().await });
-
-    let hmr_state2 = hmr_state.clone();
-    let hmr_handle = tokio::spawn(async move {
-        ProxyServer::start_hmr_server_static(hmr_port, hmr_state2).await
     });
 
-    println!("\n🚀 Server running at https://localhost:{}", server_port);
-    if hot_reload {
-        println!("   Hot Reload: enabled (ws://localhost:{})", hmr_port);
-    }
-    println!("\nPress Ctrl+C to stop\n");
+    let hmr_state2 = hmr_state.clone();
+    let hmr_tls = tls_material.clone();
+    let hmr_handle = tokio::spawn(async move {
+        if let Some((cert, key)) = hmr_tls {
+            ProxyServer::start_hmr_server_static_tls(hmr_port, hmr_state2, Some(&cert), Some(&key))
+                .await
+        } else {
+            ProxyServer::start_hmr_server_static(hmr_port, hmr_state2).await
+        }
+    });
+
+    let scheme = if use_tls { "https" } else { "http" };
+    let url = format!("{}://localhost:{}", scheme, server_port);
+    telemetry.push_log(format!("Listening on {}", url));
 
     let _watcher_guard = if hot_reload {
         let watcher = FileWatcher::new(&root);
         let hmr = hmr_state.clone();
         match watcher.watch() {
             Ok((mut rx, guard)) => {
-                info!("👀 File watcher started");
+                info!("File watcher started");
+                telemetry.push_log("Hot reload enabled");
                 tokio::spawn(async move {
                     while let Some(event) = rx.recv().await {
                         match event {
                             FileEvent::PhpChanged(paths) => {
-                                info!("📦 PHP files changed: {:?}", paths);
+                                info!("PHP files changed: {:?}", paths);
                                 let state = hmr.read().await;
                                 state.emit(HmrEvent::PhpReload);
                             }
                             FileEvent::StyleChanged(paths) => {
-                                info!("🎨 Style files changed: {:?}", paths);
+                                info!("Style files changed: {:?}", paths);
                                 let state = hmr.read().await;
                                 for path in paths {
-                                    state.emit(HmrEvent::StyleReload(
-                                        path.to_string_lossy().to_string(),
-                                    ));
+                                    state.emit(HmrEvent::StyleReload(path.to_string_lossy().to_string()));
                                 }
                             }
                         }
@@ -168,7 +222,7 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
                 Some(guard)
             }
             Err(e) => {
-                info!("⚠️ File watcher failed to start: {}. Hot reload disabled.", e);
+                telemetry.push_log(format!("Hot reload disabled: {}", e));
                 None
             }
         }
@@ -176,39 +230,82 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         None
     };
 
-    tokio::select! {
-        _ = tokio::signal::ctrl_c() => {
-            println!("\n👋 Server stopped");
+    let outcome = if no_tui {
+        for line in telemetry.snapshot_logs() {
+            println!("  {}", line);
         }
-        result = proxy_handle => {
-            match result {
-                Ok(Ok(())) => {
-                    eprintln!("❌ Proxy stopped unexpectedly (port {} may be in use)", server_port);
-                }
-                Ok(Err(e)) => {
-                    eprintln!("❌ Proxy failed: {}", e);
-                }
-                Err(e) => {
-                    eprintln!("❌ Proxy task crashed: {}", e);
+        println!("\nCleanServe running at {}\nPress Ctrl+C to stop\n", url);
+        tokio::select! {
+            _ = shutdown_signal() => Ok(()),
+            result = proxy_handle => flatten("Proxy", result),
+            result = hmr_handle => flatten("HMR server", result),
+        }
+    } else {
+        let shutdown = Arc::new(AtomicBool::new(false));
+        let dashboard_state = crate::tui::UpDashboardState {
+            project_name: config.name.clone(),
+            project_root: project_root.clone(),
+            php_version: resolved_version,
+            document_root: root.clone(),
+            url,
+            framework: layout.framework.to_string(),
+            hot_reload,
+            telemetry: telemetry.clone(),
+            shutdown: shutdown.clone(),
+        };
+
+        let mut tui_task = tokio::task::spawn_blocking(move || {
+            crate::tui::run_up_dashboard(dashboard_state)
+        });
+
+        let mut tui_finished = false;
+        let outcome = tokio::select! {
+            result = &mut tui_task => {
+                // The user quit from the dashboard.
+                tui_finished = true;
+                match result {
+                    Ok(inner) => inner,
+                    Err(e) => Err(anyhow::anyhow!("TUI task failed: {}", e)),
                 }
             }
+            _ = shutdown_signal() => Ok(()),
+            result = proxy_handle => flatten("Proxy", result),
+            result = hmr_handle => flatten("HMR server", result),
+        };
+
+        // Make sure the dashboard restores the terminal before we print anything or exit.
+        if !tui_finished {
+            shutdown.store(true, Ordering::SeqCst);
+            let _ = tui_task.await;
         }
-        result = hmr_handle => {
-            match result {
-                Ok(Ok(())) => {
-                    eprintln!("❌ HMR server stopped (port {} may be in use)", hmr_port);
-                }
-                Ok(Err(e)) => {
-                    eprintln!("❌ HMR server failed: {}", e);
-                }
-                Err(e) => {
-                    eprintln!("❌ HMR task crashed: {}", e);
-                }
-            }
-        }
-    }
+        outcome
+    };
 
     php_worker.stop();
+    outcome
+}
 
-    Ok(())
+/// Turn a finished server task into an error: a server task should only end on failure.
+fn flatten(name: &str, result: Result<anyhow::Result<()>, tokio::task::JoinError>) -> anyhow::Result<()> {
+    match result {
+        Ok(Ok(())) => Err(anyhow::anyhow!("{} stopped unexpectedly", name)),
+        Ok(Err(e)) => Err(e.context(format!("{} failed", name))),
+        Err(e) => Err(anyhow::anyhow!("{} task failed: {}", name, e)),
+    }
+}
+
+/// Resolves on Ctrl+C or (on Unix) SIGTERM, which is what `cleanserve down` sends.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
 }

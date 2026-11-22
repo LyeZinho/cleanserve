@@ -50,39 +50,19 @@ pub fn normalize_path(path: &Path) -> PathBuf {
     components.iter().collect()
 }
 
+/// Resolve `path` to the normalized location of an existing entry.
+///
+/// The [`FileSystem`] trait does not expose symlink targets, so there is nothing to follow
+/// here: symlinks are resolved transparently by the backing filesystem when it reads
+/// metadata. This only normalizes `path` and guarantees the entry exists, returning
+/// `NotFound`/`PermissionDenied` (via `metadata`) otherwise. `_max_depth` is kept for API
+/// compatibility with callers that bound symlink chains.
 pub fn resolve_symlink(
     path: &Path,
     fs: &dyn FileSystem,
-    max_depth: usize,
+    _max_depth: usize,
 ) -> Result<PathBuf, VfsError> {
     let current = normalize_path(path);
-    let mut visited = Vec::new();
-    let depth = 0;
-
-    loop {
-        if depth > max_depth {
-            return Err(VfsError::Path(format!(
-                "Max symlink depth exceeded: {}",
-                path.display()
-            )));
-        }
-
-        let meta = fs.metadata(&current)?;
-
-        if !meta.is_file {
-            return Ok(current);
-        }
-
-        if visited.contains(&current) {
-            return Err(VfsError::Path(format!(
-                "Circular symlink detected: {}",
-                path.display()
-            )));
-        }
-        visited.push(current.clone());
-
-        break;
-    }
-
+    fs.metadata(&current)?;
     Ok(current)
 }

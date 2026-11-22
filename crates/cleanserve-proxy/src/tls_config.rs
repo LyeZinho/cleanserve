@@ -51,16 +51,8 @@ pub fn create_tls_config(
 
     let key_file = std::fs::File::open(key_path)?;
     let mut key_reader = std::io::BufReader::new(key_file);
-    let keys =
-        rustls_pemfile::pkcs8_private_keys(&mut key_reader).collect::<Result<Vec<_>, _>>()?;
-
-    if keys.is_empty() {
-        return Err("No private key found in key file".into());
-    }
-
-    let key = rustls::pki_types::PrivateKeyDer::Pkcs8(
-        keys.into_iter().next().ok_or("No private key found")?,
-    );
+    let key = rustls_pemfile::private_key(&mut key_reader)?
+        .ok_or("No private key found in key file")?;
 
     let provider = Arc::new(tls13_secure_provider());
 

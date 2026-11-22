@@ -35,6 +35,12 @@ pub enum Commands {
         /// Port to bind to
         #[arg(short, long)]
         port: Option<u16>,
+        /// Plain logs instead of the Ratatui dashboard
+        #[arg(long)]
+        no_tui: bool,
+        /// HTTP only (no TLS). Browsers must use http://localhost:PORT
+        #[arg(long)]
+        http_only: bool,
     },
     /// Stop the development server
     Down,
@@ -52,15 +58,18 @@ pub enum Commands {
         #[arg(long)]
         installed: bool,
     },
-    /// Download and install a PHP version
+    /// Download and install a PHP version, or update CleanServe itself with --self
     Update {
         /// PHP version to download (e.g., 8.4, 8.3). Defaults to the project version.
         #[arg(short, long)]
         version: Option<String>,
-        /// Check for CleanServe updates instead of PHP
+        /// Update CleanServe itself (download, verify SHA-256, install, roll back on failure)
+        #[arg(long = "self")]
+        self_update: bool,
+        /// Only check whether a newer CleanServe release exists
         #[arg(long)]
         check: bool,
-        /// Force update even if versions match
+        /// Reinstall CleanServe even if already up to date (with --self)
         #[arg(long)]
         force: bool,
     },
@@ -84,11 +93,51 @@ pub enum Commands {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Manage project packages (MySQL, Redis, phpMyAdmin, etc)
+    /// Remove cleanserve.json and .cleanserve/ from this project
+    Uninstall,
+    /// Check your setup (PHP, Composer, optional Docker)
+    Doctor,
+    /// Install system dependencies for CleanServe
+    Setup {
+        #[command(subcommand)]
+        action: SetupAction,
+    },
+    /// Optional Docker stack services (MySQL, Redis, …) — install only what you need
+    Stack {
+        #[command(subcommand)]
+        action: StackAction,
+    },
+    /// Manage project packages (alias for stack; legacy)
     Package {
         #[command(subcommand)]
         action: PackageAction,
     },
+}
+
+#[derive(Subcommand)]
+pub enum SetupAction {
+    /// Install Docker Engine (distro-aware helper script)
+    Docker,
+}
+
+#[derive(Subcommand)]
+pub enum StackAction {
+    /// List available stack services
+    List,
+    /// Enable a service in this project (generates compose under .cleanserve/stack/)
+    Add {
+        name: String,
+    },
+    /// Disable a service
+    Remove {
+        name: String,
+    },
+    /// Start enabled stack services
+    Up,
+    /// Stop stack services (keeps volumes)
+    Down,
+    /// Show enabled services and container status
+    Status,
 }
 
 #[derive(Subcommand)]
@@ -125,23 +174,14 @@ pub enum PackageAction {
 }
 
 mod commands;
+mod tui;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt()
-        .with_target(false)
-        .with_level(false)
-        .with_thread_ids(false)
-        .with_thread_names(false)
-        .without_time()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("error".parse().unwrap_or_default())
-                .add_directive("cleanserve_cli=info".parse().unwrap_or_default()),
-        )
-        .init();
-
     let cli = Cli::parse();
+
+    let tui_quiet_tracing = matches!(cli.command, Commands::Up { no_tui: false, .. });
+    init_tracing(tui_quiet_tracing);
 
     match cli.command {
         Commands::Init {
@@ -151,8 +191,8 @@ async fn main() -> anyhow::Result<()> {
         } => {
             commands::init::run(name, php, quickstart).await?;
         }
-        Commands::Up { port } => {
-            commands::up::run(port).await?;
+        Commands::Up { port, no_tui, http_only } => {
+            commands::up::run(port, no_tui, http_only).await?;
         }
         Commands::Down => {
             commands::down::run().await?;
@@ -165,10 +205,11 @@ async fn main() -> anyhow::Result<()> {
         }
         Commands::Update {
             version,
+            self_update,
             check,
             force,
         } => {
-            if check {
+            if check || self_update {
                 commands::update::run_cleanserve_update(check, force).await?;
             } else {
                 commands::update::run_php_update(version).await?;
@@ -180,6 +221,23 @@ async fn main() -> anyhow::Result<()> {
         Commands::Php { php, args } => {
             commands::php::run(args, php).await?;
         }
+        Commands::Uninstall => {
+            commands::uninstall::run().await?;
+        }
+        Commands::Doctor => {
+            commands::setup::run()?;
+        }
+        Commands::Setup { action } => match action {
+            SetupAction::Docker => commands::setup::run_setup_docker()?,
+        },
+        Commands::Stack { action } => match action {
+            StackAction::List => commands::stack::run_list().await?,
+            StackAction::Add { name } => commands::stack::run_add(&name).await?,
+            StackAction::Remove { name } => commands::stack::run_remove(&name).await?,
+            StackAction::Up => commands::stack::run_up().await?,
+            StackAction::Down => commands::stack::run_down().await?,
+            StackAction::Status => commands::stack::run_status().await?,
+        },
         Commands::Package { action } => {
             let project_root = std::env::current_dir()?;
             match action {
@@ -212,4 +270,27 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn init_tracing(sink_stderr: bool) {
+    use std::io;
+    use tracing_subscriber::EnvFilter;
+
+    let filter = EnvFilter::from_default_env()
+        .add_directive("error".parse().unwrap_or_default())
+        .add_directive("cleanserve_cli=info".parse().unwrap_or_default());
+
+    let builder = tracing_subscriber::fmt()
+        .with_target(false)
+        .with_level(false)
+        .with_thread_ids(false)
+        .with_thread_names(false)
+        .without_time()
+        .with_env_filter(filter);
+
+    if sink_stderr {
+        builder.with_writer(io::sink).init();
+    } else {
+        builder.init();
+    }
 }

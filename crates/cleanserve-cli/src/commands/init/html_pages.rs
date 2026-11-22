@@ -740,9 +740,9 @@ fn generate_quickstart_about() -> String {
                     <p style="font-size: 0.9rem; margin-top: 1rem;">Show available PHP versions</p>
                 </div>
                 <div class="brutal-card">
-                    <h3>View Logs</h3>
-                    <pre class="brutal-code">cleanserve logs</pre>
-                    <p style="font-size: 0.9rem; margin-top: 1rem;">Display server logs in real-time</p>
+                    <h3>Stop Server</h3>
+                    <pre class="brutal-code">cleanserve down</pre>
+                    <p style="font-size: 0.9rem; margin-top: 1rem;">Stops the server started by <code>cleanserve up</code></p>
                 </div>
             </div>
         </section>
@@ -996,7 +996,7 @@ fn generate_quickstart_api_example() -> String {
             responseContent.className = '';
             
             try {{
-                const response = await fetch(`https://localhost:8080${{endpoint}}`);
+                const response = await fetch(endpoint);
                 const data = await response.text();
                 
                 if (response.ok) {{
@@ -1013,7 +1013,7 @@ fn generate_quickstart_api_example() -> String {
                     responseContent.className = 'error';
                 }}
             }} catch (error) {{
-                responseContent.textContent = `Connection Error: ${{error.message}}\n\nMake sure CleanServe is running on https://localhost:8080`;
+                responseContent.textContent = `Connection Error: ${{error.message}}\n\nMake sure CleanServe is running on ${{location.origin}}`;
                 responseContent.className = 'error';
             }}
         }});
@@ -1048,4 +1048,90 @@ pub fn write_quickstart_pages(
         .context("Failed to write .cleanserve/pages/api-example.html")?;
 
     Ok(())
+}
+
+/// Landing page served from `public/index.php` for projects created without `--quickstart`.
+fn generate_default_index_php(project_name: &str) -> String {
+    let name = project_name
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;");
+    format!(
+        r#"<?php
+declare(strict_types=1);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{name}</title>
+    <style>
+        body {{ font-family: system-ui, sans-serif; max-width: 40rem; margin: 4rem auto; padding: 0 1rem; line-height: 1.5; }}
+        code {{ background: #eee; padding: .1rem .3rem; border-radius: 3px; }}
+    </style>
+</head>
+<body>
+    <h1>{name}</h1>
+    <p>CleanServe is running on <strong>PHP <?= htmlspecialchars(PHP_VERSION) ?></strong>.</p>
+    <p>Edit <code>public/index.php</code> and save: the page reloads automatically.</p>
+</body>
+</html>
+"#
+    )
+}
+
+/// `public/index.php` for default projects.
+pub fn write_default_index_php(public_dir: &Path, project_name: &str) -> anyhow::Result<()> {
+    std::fs::write(public_dir.join("index.php"), generate_default_index_php(project_name))
+        .context("Failed to write public/index.php")
+}
+
+/// Pages linked from the quickstart landing page, plus the JSON endpoint its API tester calls.
+pub fn write_quickstart_site(public_dir: &Path, project_name: &str) -> anyhow::Result<()> {
+    write_quickstart_pages(public_dir, project_name)?;
+
+    let api_dir = public_dir.join("api").join("example");
+    std::fs::create_dir_all(&api_dir).context("Failed to create public/api/example/")?;
+    std::fs::write(
+        api_dir.join("index.php"),
+        r#"<?php
+declare(strict_types=1);
+header('Content-Type: application/json');
+echo json_encode([
+    'status' => 'ok',
+    'message' => 'Hello from CleanServe',
+    'php' => PHP_VERSION,
+    'time' => date(DATE_ATOM),
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+"#,
+    )
+    .context("Failed to write public/api/example/index.php")?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_index_php_escapes_project_name() {
+        let php = generate_default_index_php("<script>\"x\"</script>");
+        assert!(!php.contains("<script>"));
+        assert!(php.contains("&lt;script&gt;"));
+    }
+
+    #[test]
+    fn quickstart_site_has_pages_and_api_endpoint() {
+        let dir = std::env::temp_dir().join(format!("cs-init-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        write_quickstart_site(&dir, "demo").unwrap();
+        for f in ["index.html", "about.html", "docs.html", "api-example.html", "api/example/index.php"] {
+            assert!(dir.join(f).is_file(), "missing {f}");
+        }
+        let html = std::fs::read_to_string(dir.join("api-example.html")).unwrap();
+        assert!(!html.contains("fetch(`https://localhost"), "must not hardcode origin/port");
+        std::fs::remove_dir_all(&dir).ok();
+    }
 }

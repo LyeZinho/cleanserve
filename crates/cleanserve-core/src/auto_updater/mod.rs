@@ -1,8 +1,9 @@
+pub mod archive;
 pub mod checker;
 pub mod downloader;
 pub mod installer;
 
-pub use checker::UpdateChecker;
+pub use checker::{GitHubAsset, GitHubRelease, UpdateChecker};
 pub use downloader::BinaryDownloader;
 pub use installer::UpdateInstaller;
 
@@ -10,8 +11,10 @@ pub use installer::UpdateInstaller;
 pub struct UpdateInfo {
     pub current_version: String,
     pub latest_version: String,
-    pub download_url: String,
-    pub checksum_url: String,
+    /// Release archive for this platform (`None` if the release has no build for it).
+    pub download_url: Option<String>,
+    /// `SHA256SUMS` asset of the release (`None` if the release does not publish one).
+    pub checksum_url: Option<String>,
     pub needs_update: bool,
 }
 

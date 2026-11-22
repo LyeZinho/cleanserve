@@ -1,9 +1,8 @@
 use anyhow::Context;
-use cleanserve_core::{cleanserve_home, PhpDownloader, PhpManager};
+use cleanserve_core::{cleanserve_home, ComposerTool, PhpDownloader, PhpManager};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const COMPOSER_PHAR_URL: &str = "https://getcomposer.org/download/latest-stable/composer.phar";
 const DEFAULT_PHP: &str = "8.4";
 
 pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Result<()> {
@@ -31,7 +30,19 @@ pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Res
         .unwrap_or_else(|| DEFAULT_PHP.to_string());
 
     let managed_php = ensure_php(&php_version).await?;
-    let php_path = resolve_php_for_composer(&managed_php, &php_version)?;
+    let project_root = std::env::current_dir().context("Failed to get current directory")?;
+
+    let Some(php_path) = resolve_php_for_composer(&managed_php, &php_version) else {
+        // No PHP here can run Composer: try a Composer that brings its own PHP.
+        let Some(backend) = ComposerTool::detect_external_backend() else {
+            anyhow::bail!("{}", no_composer_php_message(&managed_php, &php_version));
+        };
+        println!("🎼 Running Composer via {}", backend.describe());
+        println!("📦 Command: composer {}\n", args.join(" "));
+        let code = ComposerTool::run_external(&backend, &project_root, &args)
+            .map_err(|e| anyhow::anyhow!(e))?;
+        return finish(code, &args, &php_version).await;
+    };
     let composer_path = ensure_composer().await?;
 
     println!("🎼 Running Composer with PHP {}", php_version);
@@ -61,12 +72,18 @@ pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Res
         .status()
         .context("Failed to execute composer")?;
 
-    if !status.success() {
-        anyhow::bail!("Composer exited with code: {:?}", status.code());
+    finish(status.code().unwrap_or(1), &args, &php_version).await
+}
+
+/// Propagate Composer's exit code (it already printed its own diagnostics) and, after a
+/// successful `create-project`, set up CleanServe in the new directory.
+async fn finish(code: i32, args: &[String], php_version: &str) -> anyhow::Result<()> {
+    if code != 0 {
+        std::process::exit(code);
     }
 
-    if let Some(target) = create_project_target(&args) {
-        maybe_init_created_project(&target, &php_version).await?;
+    if let Some(target) = create_project_target(args) {
+        maybe_init_created_project(&target, php_version).await?;
     }
 
     Ok(())
@@ -107,8 +124,12 @@ async fn ensure_composer() -> anyhow::Result<PathBuf> {
         return Ok(existing);
     }
 
-    println!("📦 Composer not found. Downloading composer.phar...");
-    download_composer_phar().await
+    println!("📦 Composer not found. Downloading composer.phar (SHA-256 verified)...");
+    let phar = ComposerTool::ensure_phar()
+        .await
+        .map_err(|e| anyhow::anyhow!(e))?;
+    println!("✅ Composer ready at {}", phar.display());
+    Ok(phar)
 }
 
 fn find_composer() -> Option<PathBuf> {
@@ -160,57 +181,6 @@ fn which(name: &str) -> Option<PathBuf> {
     None
 }
 
-async fn download_composer_phar() -> anyhow::Result<PathBuf> {
-    let dest = cleanserve_home()
-        .context("Failed to resolve CleanServe home")?
-        .join("tools")
-        .join("composer.phar");
-    if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let client = reqwest::Client::builder()
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .context("Failed to create HTTP client")?;
-
-    let response = client
-        .get(COMPOSER_PHAR_URL)
-        .send()
-        .await
-        .context("Failed to download composer.phar")?;
-
-    if !response.status().is_success() {
-        anyhow::bail!(
-            "Failed to download Composer (HTTP {}). Install it from https://getcomposer.org/",
-            response.status()
-        );
-    }
-
-    let bytes = response
-        .bytes()
-        .await
-        .context("Failed to read composer.phar")?;
-
-    if bytes.len() < 1024 || !looks_like_php(&bytes) {
-        anyhow::bail!("Downloaded composer.phar looks invalid. Try again.");
-    }
-
-    std::fs::write(&dest, &bytes).context("Failed to save composer.phar")?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&dest)?.permissions();
-        perms.set_mode(0o755);
-        std::fs::set_permissions(&dest, perms)?;
-    }
-
-    println!("✅ Composer downloaded to {}", dest.display());
-    Ok(dest)
-}
-
 /// Composer needs these even for `--version`. php-runtimes currently builds
 /// with `--disable-all` and omits several of them.
 const COMPOSER_REQUIRED_EXTS: &[&str] = &[
@@ -224,16 +194,18 @@ const COMPOSER_REQUIRED_EXTS: &[&str] = &[
     "ctype",
 ];
 
-fn resolve_php_for_composer(managed: &Path, php_version: &str) -> anyhow::Result<PathBuf> {
+/// A PHP that has everything Composer needs: the managed one, `CLEANSERVE_COMPOSER_PHP`, or the
+/// system PHP. `None` when none qualifies.
+fn resolve_php_for_composer(managed: &Path, php_version: &str) -> Option<PathBuf> {
     if php_has_composer_extensions(managed) {
-        return Ok(managed.to_path_buf());
+        return Some(managed.to_path_buf());
     }
 
     if let Ok(override_path) = std::env::var("CLEANSERVE_COMPOSER_PHP") {
         let path = PathBuf::from(override_path);
         if php_has_composer_extensions(&path) {
             println!("Using CLEANSERVE_COMPOSER_PHP={}", path.display());
-            return Ok(path);
+            return Some(path);
         }
     }
 
@@ -242,23 +214,24 @@ fn resolve_php_for_composer(managed: &Path, php_version: &str) -> anyhow::Result
             "⚠️  CleanServe PHP ({}) is missing Composer extensions (phar, tokenizer, …).",
             managed.display()
         );
-        println!(
-            "   Using system PHP {} for this command.",
-            system_php.display()
-        );
+        println!("   Using system PHP {} for this command.", system_php.display());
         println!(
             "   After php-runtimes releases new binaries: cleanserve update --version {}",
             php_version
         );
-        return Ok(system_php);
+        return Some(system_php);
     }
 
-    let missing = missing_composer_extensions(managed);
-    anyhow::bail!(
+    None
+}
+
+fn no_composer_php_message(managed: &Path, php_version: &str) -> String {
+    format!(
         "This PHP build is missing extensions Composer needs: {}.\n\
-         Install system PHP (e.g. pacman -S php) or set CLEANSERVE_COMPOSER_PHP=/usr/bin/php\n\
+         Install system PHP (e.g. pacman -S php), set CLEANSERVE_COMPOSER_PHP=/usr/bin/php, \
+         install Composer (https://getcomposer.org/download/) or Docker (`cleanserve setup docker`).\n\
          Long-term: rebuild php-runtimes with phar enabled, then: cleanserve update --version {}",
-        missing.join(", "),
+        missing_composer_extensions(managed).join(", "),
         php_version
     )
 }
@@ -286,10 +259,6 @@ fn prepend_path(dir: &Path) -> std::ffi::OsString {
         dirs.extend(std::env::split_paths(&existing));
     }
     std::env::join_paths(dirs).unwrap_or_else(|_| dir.as_os_str().to_os_string())
-}
-
-fn looks_like_php(bytes: &[u8]) -> bool {
-    bytes.starts_with(b"<?php") || bytes.starts_with(b"#!/usr/bin/env php") || bytes.windows(5).take(8).any(|w| w == b"<?php")
 }
 
 fn is_create_project(args: &[String]) -> bool {

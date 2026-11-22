@@ -43,7 +43,7 @@ cleanserve list --refresh
 cleanserve update --version 8.4
 ```
 
-`cleanserve update` with no flags installs the version from `cleanserve.json` (or 8.4). Use `cleanserve update --check` to look for CleanServe itself.
+`cleanserve update` with no flags installs the version from `cleanserve.json` (or 8.4). Use `cleanserve update --check` to look for a newer CleanServe and `cleanserve update --self` to install it.
 
 ### Switch Project PHP Version
 

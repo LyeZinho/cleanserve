@@ -65,15 +65,19 @@ Installed versions are stored in `~/.cleanserve/php/` (project-local `.cleanserv
 
 ## update
 
-Downloads and installs a PHP version into the shared cache.
+Downloads and installs a PHP version into the shared cache, or updates CleanServe itself.
 
 ```bash
 cleanserve update [--version VERSION]
+cleanserve update --check
+cleanserve update --self [--force]
 ```
 
 **Arguments:**
 - `--version`: The PHP version to download (e.g., `8.4` or `8.4.19`). If omitted, uses `engine.php` from `cleanserve.json`, or 8.4.
-- `--check`: Check for CleanServe application updates instead of installing PHP.
+- `--check`: Only check whether a newer CleanServe release exists.
+- `--self`: Update CleanServe itself. The release archive is verified against the release's `SHA256SUMS`, the new binary is tested, and the previous one is restored if it fails. Download URLs (and every redirect) must pass the SSRF allowlist.
+- `--force`: With `--self`, reinstall even when already up to date.
 
 ## composer
 

@@ -1,6 +1,7 @@
 pub mod init;
 pub mod up;
 pub mod down;
+pub mod pidfile;
 pub mod use_;
 pub mod list;
 pub mod update;
@@ -8,3 +9,7 @@ pub mod composer;
 pub mod php;
 pub mod project_env;
 pub mod package;
+pub mod project_config;
+pub mod stack;
+pub mod setup;
+pub mod uninstall;

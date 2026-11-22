@@ -1,5 +1,5 @@
 use anyhow::Context;
-use cleanserve_core::{ensure_writable_dirs, Framework, FrameworkInfo};
+use cleanserve_core::{ensure_writable_dirs, Framework, FrameworkInfo, ProjectLayout};
 use std::path::{Path, PathBuf};
 
 pub mod html_pages;
@@ -10,7 +10,9 @@ pub async fn run(
     quickstart: bool,
 ) -> anyhow::Result<()> {
     let hints = composer_hints();
-    let framework = FrameworkInfo::detect(Path::new("."));
+    let project_root = std::env::current_dir().context("Cannot read current directory")?;
+    let framework = FrameworkInfo::detect(&project_root);
+    let layout = ProjectLayout::detect(&project_root);
 
     let project_name = name
         .or(hints.name)
@@ -23,6 +25,7 @@ pub async fn run(
 
     let php = php
         .or(hints.php)
+        .or_else(|| layout.suggested_php.clone())
         .unwrap_or_else(|| "8.4".to_string());
 
     let config_path = Path::new("cleanserve.json");
@@ -35,11 +38,16 @@ pub async fn run(
         if let Some(root) = document_root_for(&framework) {
             server.root = root;
         }
+    } else if Path::new("composer.json").exists() {
+        server.root = layout.document_root_for_config(&project_root);
     } else if Path::new("public/index.php").exists() {
         server.root = "public/".to_string();
     } else if Path::new("index.php").exists() {
         server.root = "./".to_string();
     }
+    let scheme = if server.tls { "https" } else { "http" };
+    let server_port = server.port;
+    let document_root = server.root.clone();
 
     let config = cleanserve_core::CleanServeConfig {
         name: project_name.clone(),
@@ -81,19 +89,26 @@ pub async fn run(
         || framework.framework != Framework::Unknown
         || Path::new("public/index.php").exists();
 
+    // Internal pages (404/error) used by the dev server live in .cleanserve/pages/.
+    html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php)
+        .context("Failed to write default pages")?;
+
+    // Something the server can actually serve at `/`: an index.php, or the quickstart site.
     let public_dir = Path::new("public");
+    let mut entrypoint = format!("{}/index.php", document_root.trim_end_matches('/'));
     if !public_dir.exists() && !has_app {
         std::fs::create_dir_all(public_dir).context("Failed to create public/ directory")?;
 
         if quickstart {
-            html_pages::write_quickstart_pages(&cleanserve_pages_dir, &project_name)
+            html_pages::write_quickstart_site(public_dir, &project_name)
                 .context("Failed to write quickstart pages")?;
+            entrypoint = "public/index.html".to_string();
+            println!("✓ Created public/ directory with quickstart pages");
         } else {
-            html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php)
-                .context("Failed to write default pages")?;
+            html_pages::write_default_index_php(public_dir, &project_name)
+                .context("Failed to write public/index.php")?;
+            println!("✓ Created public/index.php");
         }
-
-        println!("✓ Created public/ directory with HTML pages");
     }
 
     for result in ensure_writable_dirs(&framework) {
@@ -129,13 +144,18 @@ pub async fn run(
     println!();
     println!("Next steps:");
     if has_app {
-        println!("  1. Run 'cleanserve composer install' if dependencies are missing");
-        println!("  2. Run 'cleanserve up' to start the server");
+        if framework.framework == Framework::Yii2 {
+            println!("  1. Run `cleanserve php init` (Yii environment setup)");
+            println!("  2. Run `cleanserve composer install` if dependencies are missing");
+        } else {
+            println!("  1. Run `cleanserve composer install` if dependencies are missing");
+            println!("  2. Run `cleanserve up` to start the server");
+        }
     } else {
-        println!("  1. Edit public/index.php with your application code");
-        println!("  2. Run 'cleanserve up' to start the server");
+        println!("  1. Edit {} with your application code", entrypoint);
+        println!("  2. Run `cleanserve up` to start the server");
     }
-    println!("  3. Open http://localhost:8080 in your browser");
+    println!("  Open {}://localhost:{} in your browser", scheme, server_port);
 
     Ok(())
 }

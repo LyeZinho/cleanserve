@@ -74,6 +74,11 @@ impl SlowlorisProtection {
         conns.insert(addr, now);
     }
 
+    /// Stop tracking a connection (call when the TCP connection closes).
+    pub fn remove_connection(&self, addr: SocketAddr) {
+        self.active_connections.lock().unwrap().remove(&addr);
+    }
+
     /// Clean up expired connections from tracking.
     ///
     /// Call periodically (e.g., every 60 seconds) to prevent memory leaks.

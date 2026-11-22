@@ -41,14 +41,20 @@ impl PhpDownloader {
     pub async fn download(&self, version: &str) -> Result<PathBuf> {
         let manifest = VersionManifest::fetch(false).await?;
 
-        let php_version = manifest.find_version(version).ok_or_else(|| {
+        let php_version = manifest.resolve_version(version).ok_or_else(|| {
             CleanServeError::Download(format!(
-                "PHP {} not found in manifest. Run 'cleanserve list' to see available versions.",
+                "PHP {} is not available. Run 'cleanserve list' to see installable versions.",
                 version
             ))
         })?;
 
         let resolved = php_version.version.clone();
+        if resolved != version {
+            info!(
+                "PHP {} not in manifest; using compatible build {}",
+                version, resolved
+            );
+        }
 
         if let Some(existing) = self.get_php_exe(&resolved) {
             info!("PHP {} is already installed", resolved);
@@ -213,3 +219,22 @@ pub fn current_platform() -> &'static str {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[test]
+    fn locates_linux_x64_php_layout() {
+        let dir = TempDir::new().unwrap();
+        let install = dir.path().join("php-8.4.19").join("linux-x64");
+        fs::create_dir_all(&install).unwrap();
+        let bin = install.join("php-8.4.19");
+        fs::write(&bin, b"#!/bin/sh\n").unwrap();
+
+        let downloader = PhpDownloader::new(dir.path()).unwrap();
+        let found = downloader.get_php_exe("8.4.19").expect("binary should be found");
+        assert_eq!(found, bin);
+    }
+}

@@ -20,6 +20,12 @@ pub mod path_traversal;
 pub mod slowloris;
 pub mod package_manager;
 pub mod auto_updater;
+pub mod project_layout;
+pub mod composer_tool;
+pub mod runtime_telemetry;
+pub mod php_runtime;
+pub mod dev_router;
+pub mod stack;
 pub mod url_validator;
 
 pub use cleanserve_shared::{CleanServeError, Result};
@@ -43,4 +49,12 @@ pub use error_overlay::{PhpError, StackFrame, parse_php_error, vscode_link, jetb
 pub use static_blacklist::StaticBlacklist;
 pub use path_traversal::PathTraversal;
 pub use slowloris::SlowlorisProtection;
+pub use project_php::{
+    ensure_project_php, project_php_dir, resolve_dev_php, validate_project_php, DevPhp,
+};
+pub use project_layout::ProjectLayout;
+pub use dev_router::{ensure_dev_router, cleanserve_router_path};
+pub use composer_tool::{ComposerBackend, ComposerTool};
+pub use runtime_telemetry::{RequestEntry, RuntimeTelemetry};
+pub use stack::{StackManager, ensure_docker, docker_available, teardown_all_for_project};
 pub use url_validator::{UrlValidator, UrlValidationError};

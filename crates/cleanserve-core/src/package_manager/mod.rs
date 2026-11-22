@@ -24,7 +24,6 @@ pub use registry::PackageRegistry;
 pub use runtime::{PackageRuntime, RuntimeStatus};
 
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
 
 /// Package metadata from manifest
 #[derive(Debug, Clone, Serialize, Deserialize)]

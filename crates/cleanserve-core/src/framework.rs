@@ -19,6 +19,8 @@ pub enum Framework {
     WordPress,
     /// Drupal CMS
     Drupal,
+    /// Yii 2 (advanced/basic template)
+    Yii2,
     /// Yii / Yii 3 (yiisoft)
     Yii,
     /// Unknown/custom framework
@@ -33,6 +35,7 @@ impl std::fmt::Display for Framework {
             Framework::CodeIgniter => write!(f, "CodeIgniter"),
             Framework::WordPress => write!(f, "WordPress"),
             Framework::Drupal => write!(f, "Drupal"),
+            Framework::Yii2 => write!(f, "Yii2"),
             Framework::Yii => write!(f, "Yii"),
             Framework::Unknown => write!(f, "Unknown"),
         }
@@ -61,6 +64,11 @@ impl FrameworkInfo {
         // Symfony detection
         if root.join("bin/console").exists() && root.join("composer.json").exists() {
             return Self::symfony(root);
+        }
+
+        // Yii 2 (basic/advanced) must be checked before the generic yiisoft/* detection
+        if Self::is_yii2(root) {
+            return Self::yii2(root);
         }
 
         // Yii / Yii 3 detection
@@ -225,6 +233,46 @@ impl FrameworkInfo {
         }
     }
 
+    fn is_yii2(root: &Path) -> bool {
+        if root.join("yii").exists() || root.join("yii.bat").exists() {
+            return true;
+        }
+        let composer = root.join("composer.json");
+        if composer.exists() {
+            if let Ok(content) = std::fs::read_to_string(&composer) {
+                if content.contains("yiisoft/yii2") {
+                    return true;
+                }
+            }
+        }
+        root.join("common/config/main.php").exists()
+            && (root.join("frontend").exists() || root.join("backend").exists())
+    }
+
+    fn yii2(root: &Path) -> Self {
+        let entry = if root.join("frontend/web/index.php").exists() {
+            root.join("frontend/web/index.php")
+        } else if root.join("web/index.php").exists() {
+            root.join("web/index.php")
+        } else {
+            root.join("index.php")
+        };
+
+        Self {
+            framework: Framework::Yii2,
+            version: None,
+            writable_dirs: vec![
+                root.join("frontend/runtime"),
+                root.join("backend/runtime"),
+                root.join("console/runtime"),
+                root.join("common/runtime"),
+            ],
+            entry_point: entry,
+            needs_storage_dirs: true,
+            needs_var_dirs: false,
+        }
+    }
+
     fn unknown(root: &Path) -> Self {
         Self {
             framework: Framework::Unknown,
@@ -340,7 +388,7 @@ impl FrameworkInfo {
                     "max_execution_time=300".to_string(),
                 ]
             }
-            Framework::Yii => {
+            Framework::Yii | Framework::Yii2 => {
                 vec![
                     "upload_max_filesize=128M".to_string(),
                     "post_max_size=128M".to_string(),
@@ -383,6 +431,21 @@ mod tests {
     #[test]
     fn test_framework_display() {
         assert_eq!(Framework::Laravel.to_string(), "Laravel");
+        assert_eq!(Framework::Yii2.to_string(), "Yii2");
         assert_eq!(Framework::Unknown.to_string(), "Unknown");
+    }
+
+    #[test]
+    fn test_detect_yii2_from_composer() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("composer.json"),
+            r#"{"require":{"yiisoft/yii2":"~2.0"}}"#,
+        )
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("common/config")).unwrap();
+        std::fs::write(dir.path().join("common/config/main.php"), "<?php").unwrap();
+        let info = FrameworkInfo::detect(dir.path());
+        assert_eq!(info.framework, Framework::Yii2);
     }
 }

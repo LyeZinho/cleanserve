@@ -1,21 +1,27 @@
-use cleanserve_core::{RateLimiter, RequestValidator, SecurityHeaders, StaticBlacklist, PathTraversal, SlowlorisProtection};
+use cleanserve_core::{
+    RateLimiter, RequestValidator, StaticBlacklist, PathTraversal, SlowlorisProtection,
+    RequestEntry, RuntimeTelemetry, SecurityHeaders, is_static_file,
+};
+use cleanserve_core::php_worker::DEFAULT_PHP_PORT;
 use futures_util::{SinkExt, StreamExt};
 use http_body_util::Full;
 use hyper::body::Bytes;
 use hyper::server::conn::http1;
 use hyper::service::service_fn;
 use hyper::{Method, Request, Response, StatusCode};
-use hyper_util::rt::TokioIo;
+use hyper_util::rt::{TokioIo, TokioTimer};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::net::SocketAddr;
+use std::time::Duration;
 use tokio::net::TcpListener;
-use tokio_rustls::TlsAcceptor;
 use tokio::sync::{broadcast, RwLock};
 use tokio_tungstenite::accept_async;
 use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, error, warn};
+use crate::tls_config::create_tls_config;
+use tokio_rustls::TlsAcceptor;
 
 /// HMR event types
 #[derive(Clone, Debug)]
@@ -56,8 +62,9 @@ impl Default for HmrState {
 
 const HMR_CLIENT_SCRIPT: &str = r#"
 (function() {
-    const wsPort = parseInt(location.port || '80') + 1;
-    const ws = new WebSocket('ws://' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
+    const wsPort = parseInt(location.port || (location.protocol === 'https:' ? '443' : '80')) + 1;
+    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const ws = new WebSocket(wsProto + '//' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'reload') {
@@ -76,7 +83,16 @@ const HMR_CLIENT_SCRIPT: &str = r#"
     };
     ws.onclose = () => {
         console.log('[CleanServe] HMR disconnected, reconnecting...');
-        setTimeout(() => location.reload(), 3000);
+        setTimeout(function () {
+            try {
+                var ws2 = new WebSocket(wsProto + '//' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
+                ws2.onmessage = ws.onmessage;
+                ws2.onopen = ws.onopen;
+                ws2.onclose = ws.onclose;
+            } catch (e) {
+                console.log('[CleanServe] HMR reconnect failed', e);
+            }
+        }, 1500);
     };
     ws.onopen = () => {
         console.log('[CleanServe] HMR connected on port ' + wsPort);
@@ -92,11 +108,23 @@ pub struct ProxyServer {
     request_validator: Arc<RequestValidator>,
     slowloris_protection: Arc<SlowlorisProtection>,
     not_found_html: Arc<String>,
+    telemetry: Option<Arc<RuntimeTelemetry>>,
+    php_port: u16,
     security_headers: SecurityHeaders,
     tls_cert: Option<PathBuf>,
     tls_key: Option<PathBuf>,
-    php_backend_port: u16,
 }
+
+/// Where requests are forwarded and how the client reached us.
+#[derive(Clone)]
+struct Upstream {
+    php_port: u16,
+    https: bool,
+    security_headers: SecurityHeaders,
+}
+
+/// Max time a client may take to send the request headers (real slowloris defense).
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(30);
 
 impl ProxyServer {
     pub fn new(port: u16, root: String) -> Self {
@@ -109,15 +137,43 @@ impl ProxyServer {
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
             not_found_html: Arc::new(not_found_html),
+            telemetry: None,
+            php_port: DEFAULT_PHP_PORT,
             security_headers: SecurityHeaders::default(),
             tls_cert: None,
             tls_key: None,
-            php_backend_port: 9000,
         }
+    }
+
+    /// Port of the PHP built-in server requests are forwarded to.
+    pub fn with_php_port(mut self, php_port: u16) -> Self {
+        self.php_port = php_port;
+        self
+    }
+
+    /// Alias of [`with_php_port`](Self::with_php_port).
+    pub fn with_php_backend(self, port: u16) -> Self {
+        self.with_php_port(port)
+    }
+
+    /// Terminate TLS on the proxy (self-signed or custom cert) when started with [`start`](Self::start).
+    pub fn with_tls(mut self, cert_path: PathBuf, key_path: PathBuf) -> Self {
+        self.tls_cert = Some(cert_path);
+        self.tls_key = Some(key_path);
+        self
     }
 
     /// Create proxy with shared HMR state (for hot reload integration)
     pub fn new_with_hmr(port: u16, root: String, hmr_state: Arc<RwLock<HmrState>>) -> Self {
+        Self::new_with_hmr_and_telemetry(port, root, hmr_state, None)
+    }
+
+    pub fn new_with_hmr_and_telemetry(
+        port: u16,
+        root: String,
+        hmr_state: Arc<RwLock<HmrState>>,
+        telemetry: Option<Arc<RuntimeTelemetry>>,
+    ) -> Self {
         let not_found_html = Self::load_404_html();
         Self {
             port,
@@ -127,23 +183,12 @@ impl ProxyServer {
             request_validator: Arc::new(RequestValidator::new(10_000_000, 50_000)),
             slowloris_protection: Arc::new(SlowlorisProtection::new(30_000)),
             not_found_html: Arc::new(not_found_html),
+            telemetry,
+            php_port: DEFAULT_PHP_PORT,
             security_headers: SecurityHeaders::default(),
             tls_cert: None,
             tls_key: None,
-            php_backend_port: 9000,
         }
-    }
-
-    /// Terminate TLS on the proxy (self-signed or custom cert).
-    pub fn with_tls(mut self, cert_path: PathBuf, key_path: PathBuf) -> Self {
-        self.tls_cert = Some(cert_path);
-        self.tls_key = Some(key_path);
-        self
-    }
-
-    pub fn with_php_backend(mut self, port: u16) -> Self {
-        self.php_backend_port = port;
-        self
     }
 
     /// Load 404.html from .cleanserve/pages/ directory
@@ -162,18 +207,31 @@ impl ProxyServer {
     }
 
     pub async fn start(&self) -> anyhow::Result<()> {
+        match (&self.tls_cert, &self.tls_key) {
+            (Some(cert), Some(key)) => {
+                self.start_with_tls_paths(cert.to_str(), key.to_str()).await
+            }
+            _ => self.start_with_tls_paths(None, None).await,
+        }
+    }
+
+    pub async fn start_https(&self, cert_path: &str, key_path: &str) -> anyhow::Result<()> {
+        self.start_with_tls_paths(Some(cert_path), Some(key_path)).await
+    }
+
+    async fn start_with_tls_paths(
+        &self,
+        cert_path: Option<&str>,
+        key_path: Option<&str>,
+    ) -> anyhow::Result<()> {
         let addr = SocketAddr::from(([127, 0, 0, 1], self.port));
         let listener = TcpListener::bind(addr).await?;
 
-        let tls_acceptor = match (&self.tls_cert, &self.tls_key) {
+        let tls_acceptor = match (cert_path, key_path) {
             (Some(cert), Some(key)) => {
-                let config = crate::tls_config::create_tls_config(
-                    cert.to_str().unwrap_or(""),
-                    key.to_str().unwrap_or(""),
-                )
-                .map_err(|e| anyhow::anyhow!(e.to_string()))?;
-                info!("🚀 CleanServe proxy listening on https://{}", addr);
-                Some(TlsAcceptor::from(Arc::new(config)))
+                let config = create_tls_config(cert, key).map_err(|e| anyhow::anyhow!("{}", e))?;
+                info!("🔒 CleanServe proxy listening on https://{}", addr);
+                Some(Arc::new(TlsAcceptor::from(Arc::new(config))))
             }
             _ => {
                 info!("🚀 CleanServe proxy listening on http://{}", addr);
@@ -190,47 +248,81 @@ impl ProxyServer {
                     let request_validator = Arc::clone(&self.request_validator);
                     let slowloris_protection = Arc::clone(&self.slowloris_protection);
                     let not_found_html = Arc::clone(&self.not_found_html);
-                    let security_headers = self.security_headers.clone();
-                    let php_backend_port = self.php_backend_port;
+                    let telemetry = self.telemetry.clone();
+                    let tls_acceptor = tls_acceptor.clone();
+                    let php_port = self.php_port;
+                    let https = tls_acceptor.is_some();
+                    let upstream = Upstream {
+                        php_port,
+                        https,
+                        security_headers: self.security_headers.clone(),
+                    };
 
+                    let slowloris_cleanup = Arc::clone(&slowloris_protection);
                     slowloris_protection.register_connection(remote_addr);
 
                     if let Some(acceptor) = tls_acceptor.clone() {
                         tokio::spawn(async move {
-                            match acceptor.accept(stream).await {
-                                Ok(tls_stream) => {
-                                    Self::serve_http1(
-                                        TokioIo::new(tls_stream),
-                                        root,
-                                        hmr_state,
-                                        rate_limiter,
-                                        request_validator,
-                                        slowloris_protection,
-                                        remote_addr,
-                                        not_found_html,
-                                        security_headers,
-                                        php_backend_port,
-                                    )
-                                    .await;
+                            let io = match acceptor.accept(stream).await {
+                                Ok(tls_stream) => TokioIo::new(tls_stream),
+                                Err(e) => {
+                                    if let Some(t) = &telemetry {
+                                        t.record_tls_handshake_failure();
+                                    } else {
+                                        error!("TLS handshake failed: {}", e);
+                                    }
+                                    slowloris_protection.remove_connection(remote_addr);
+                                    return;
                                 }
-                                Err(e) => error!("TLS handshake failed: {}", e),
+                            };
+                            let stderr_logging = telemetry.is_none();
+                            let service = service_fn(move |req| {
+                                let root = Arc::clone(&root);
+                                let hmr_state = Arc::clone(&hmr_state);
+                                let rate_limiter = Arc::clone(&rate_limiter);
+                                let request_validator = Arc::clone(&request_validator);
+                                let slowloris_protection = Arc::clone(&slowloris_protection);
+                                let not_found_html = Arc::clone(&not_found_html);
+                                let telemetry = telemetry.clone();
+                                handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry, upstream.clone())
+                            });
+                            if let Err(e) = http1::Builder::new()
+                                .timer(TokioTimer::new())
+                                .header_read_timeout(HEADER_READ_TIMEOUT)
+                                .serve_connection(io, service)
+                                .await
+                            {
+                                if stderr_logging {
+                                    error!("Error serving connection: {}", e);
+                                }
                             }
+                            slowloris_cleanup.remove_connection(remote_addr);
                         });
                     } else {
                         tokio::spawn(async move {
-                            Self::serve_http1(
-                                TokioIo::new(stream),
-                                root,
-                                hmr_state,
-                                rate_limiter,
-                                request_validator,
-                                slowloris_protection,
-                                remote_addr,
-                                not_found_html,
-                                security_headers,
-                                php_backend_port,
-                            )
-                            .await;
+                            let io = TokioIo::new(stream);
+                            let stderr_logging = telemetry.is_none();
+                            let service = service_fn(move |req| {
+                                let root = Arc::clone(&root);
+                                let hmr_state = Arc::clone(&hmr_state);
+                                let rate_limiter = Arc::clone(&rate_limiter);
+                                let request_validator = Arc::clone(&request_validator);
+                                let slowloris_protection = Arc::clone(&slowloris_protection);
+                                let not_found_html = Arc::clone(&not_found_html);
+                                let telemetry = telemetry.clone();
+                                handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry, upstream.clone())
+                            });
+                            if let Err(e) = http1::Builder::new()
+                                .timer(TokioTimer::new())
+                                .header_read_timeout(HEADER_READ_TIMEOUT)
+                                .serve_connection(io, service)
+                                .await
+                            {
+                                if stderr_logging {
+                                    error!("Error serving connection: {}", e);
+                                }
+                            }
+                            slowloris_cleanup.remove_connection(remote_addr);
                         });
                     }
                 }
@@ -238,45 +330,6 @@ impl ProxyServer {
                     error!("Accept error: {}", e);
                 }
             }
-        }
-    }
-
-    async fn serve_http1<I>(
-        io: TokioIo<I>,
-        root: Arc<String>,
-        hmr_state: Arc<RwLock<HmrState>>,
-        rate_limiter: Arc<RateLimiter>,
-        request_validator: Arc<RequestValidator>,
-        slowloris_protection: Arc<SlowlorisProtection>,
-        remote_addr: SocketAddr,
-        not_found_html: Arc<String>,
-        security_headers: SecurityHeaders,
-        php_backend_port: u16,
-    ) where
-        I: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send + 'static,
-    {
-        let service = service_fn(move |req| {
-            let root = Arc::clone(&root);
-            let hmr_state = Arc::clone(&hmr_state);
-            let rate_limiter = Arc::clone(&rate_limiter);
-            let request_validator = Arc::clone(&request_validator);
-            let slowloris_protection = Arc::clone(&slowloris_protection);
-            let not_found_html = Arc::clone(&not_found_html);
-            handle_request(
-                req,
-                root,
-                hmr_state,
-                rate_limiter,
-                request_validator,
-                slowloris_protection,
-                remote_addr,
-                not_found_html,
-                security_headers.clone(),
-                php_backend_port,
-            )
-        });
-        if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
-            error!("Error serving connection: {}", e);
         }
     }
 
@@ -302,24 +355,55 @@ impl ProxyServer {
         ws_port: u16,
         hmr_state: Arc<RwLock<HmrState>>,
     ) -> anyhow::Result<()> {
+        Self::start_hmr_server_static_tls(ws_port, hmr_state, None, None).await
+    }
+
+    pub async fn start_hmr_server_static_tls(
+        ws_port: u16,
+        hmr_state: Arc<RwLock<HmrState>>,
+        cert_path: Option<&str>,
+        key_path: Option<&str>,
+    ) -> anyhow::Result<()> {
         let addr = SocketAddr::from(([127, 0, 0, 1], ws_port));
         let listener = TcpListener::bind(addr).await?;
-        info!("🔌 HMR WebSocket server on ws://{}", addr);
+
+        let tls_acceptor = match (cert_path, key_path) {
+            (Some(cert), Some(key)) => {
+                let config = create_tls_config(cert, key).map_err(|e| anyhow::anyhow!("{}", e))?;
+                info!("🔌 HMR WebSocket server on wss://{}", addr);
+                Some(Arc::new(TlsAcceptor::from(Arc::new(config))))
+            }
+            _ => {
+                info!("🔌 HMR WebSocket server on ws://{}", addr);
+                None
+            }
+        };
 
         loop {
             if let Ok((stream, _)) = listener.accept().await {
                 let hmr_state = Arc::clone(&hmr_state);
-                tokio::spawn(async move {
-                    Self::handle_ws_connection(stream, hmr_state).await;
-                });
+                if let Some(acceptor) = tls_acceptor.clone() {
+                    tokio::spawn(async move {
+                        match acceptor.accept(stream).await {
+                            Ok(tls_stream) => Self::handle_ws_connection(tls_stream, hmr_state).await,
+                            Err(e) => warn!("HMR TLS handshake failed: {}", e),
+                        }
+                    });
+                } else {
+                    tokio::spawn(async move {
+                        Self::handle_ws_connection(stream, hmr_state).await;
+                    });
+                }
             }
         }
     }
 
-    async fn handle_ws_connection(
-        stream: tokio::net::TcpStream,
+    async fn handle_ws_connection<S>(
+        stream: S,
         hmr_state: Arc<RwLock<HmrState>>,
-    ) {
+    ) where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
         match accept_async(stream).await {
             Ok(ws_stream) => {
                 let (mut write, _read) = ws_stream.split();
@@ -356,7 +440,46 @@ impl ProxyServer {
     }
 }
 
+/// Handle one request and record it (method, path, status, duration) for the dashboard.
+#[allow(clippy::too_many_arguments)]
 async fn handle_request(
+    req: Request<hyper::body::Incoming>,
+    root: Arc<String>,
+    hmr_state: Arc<RwLock<HmrState>>,
+    rate_limiter: Arc<RateLimiter>,
+    request_validator: Arc<RequestValidator>,
+    slowloris_protection: Arc<SlowlorisProtection>,
+    remote_addr: SocketAddr,
+    not_found_html: Arc<String>,
+    telemetry: Option<Arc<RuntimeTelemetry>>,
+    upstream: Upstream,
+) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    let started = std::time::Instant::now();
+    let at = std::time::SystemTime::now();
+    let method = req.method().as_str().to_string();
+    // Path only: the query string may carry tokens we do not want on screen.
+    let path = req.uri().path().to_string();
+
+    let result = handle_request_inner(
+        req, root, hmr_state, rate_limiter, request_validator, slowloris_protection,
+        remote_addr, not_found_html, telemetry.clone(), upstream,
+    )
+    .await;
+
+    if let (Some(t), Ok(resp)) = (&telemetry, &result) {
+        t.push_request(RequestEntry {
+            at,
+            method,
+            path,
+            status: resp.status().as_u16(),
+            duration: started.elapsed(),
+        });
+    }
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn handle_request_inner(
     req: Request<hyper::body::Incoming>,
     root: Arc<String>,
     _hmr_state: Arc<RwLock<HmrState>>,
@@ -365,23 +488,19 @@ async fn handle_request(
     slowloris_protection: Arc<SlowlorisProtection>,
     remote_addr: SocketAddr,
     not_found_html: Arc<String>,
-    security_headers: SecurityHeaders,
-    php_backend_port: u16,
+    telemetry: Option<Arc<RuntimeTelemetry>>,
+    upstream: Upstream,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    if let Some(t) = &telemetry {
+        t.record_request();
+    }
+
     let ip = remote_addr.ip();
     let is_localhost = ip.is_loopback();
 
-    if !slowloris_protection.is_connection_valid(remote_addr) {
-        warn!("Slowloris attack detected - connection timeout: {}", remote_addr);
-        slowloris_protection.mark_request_complete(remote_addr);
-        return Ok(Response::builder()
-            .status(StatusCode::REQUEST_TIMEOUT)
-            .header("Content-Type", "application/json")
-            .body(Full::new(Bytes::from(
-                r#"{"error":"request_timeout","message":"Request headers timeout"}"#,
-            )))
-            .expect("valid 408 response"));
-    }
+    // The request headers are fully received once hyper hands us the request (the real
+    // slow-header defense is hyper's `header_read_timeout`), so restart the idle timer.
+    slowloris_protection.mark_request_complete(remote_addr);
 
     if !is_localhost && !rate_limiter.is_allowed(&ip.to_string()).await {
         warn!("Rate limit exceeded for IP: {}", ip);
@@ -475,7 +594,7 @@ async fn handle_request(
 
       info!("Processing request: {} {}, root={}", method, path, root.as_str());
 
-     if method == Method::GET || method == Method::POST {
+     {
         let mut request_path = path.to_string();
 
         if request_path == "/" || request_path.ends_with('/') {
@@ -503,30 +622,12 @@ async fn handle_request(
 
         let file_path = PathBuf::from(root.as_str()).join(request_path.trim_start_matches('/'));
 
-        if let Some(ext) = file_path.extension() {
-            if ext == "php" {
-                match forward_to_php_worker(req, &request_path, php_backend_port).await {
-                    Ok(response) => {
-                        slowloris_protection.mark_request_complete(remote_addr);
-                        return Ok(response);
-                    }
-                    Err(e) => {
-                        error!("PHP worker error: {}", e);
-                        return Ok(Response::builder()
-                            .status(StatusCode::INTERNAL_SERVER_ERROR)
-                            .header("Content-Type", "text/html")
-                            .body(Full::new(Bytes::from(format!(
-                                "<h1>PHP Error</h1><p>{}</p>",
-                                e
-                            ))))
-                            .expect("valid 500 response"));
-                    }
-                }
-            }
-        }
+        let is_php_script = file_path
+            .extension()
+            .is_some_and(|ext| ext == "php");
 
-        // Static file serving (only for GET)
-        let is_get = method == Method::GET;
+        // Static file serving (only for GET, existing files, non-PHP)
+        let is_get = method == Method::GET || method == Method::HEAD;
         let path_starts = file_path.to_string_lossy().starts_with(root.as_str());
         let is_file = file_path.is_file();
         
@@ -535,7 +636,7 @@ async fn handle_request(
                   file_path.display(), root.as_str(), path_starts, is_file);
         }
         
-        if is_get && path_starts && is_file {
+        if is_get && path_starts && is_file && !is_php_script {
             match tokio::fs::read(&file_path).await {
                 Ok(content) => {
                     let mime = mime_guess::from_path(&file_path)
@@ -544,11 +645,12 @@ async fn handle_request(
 
                     info!("📄 Serving static file: {} (mime: {})", file_path.display(), mime);
 
-                    let mut resp = Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", mime.as_str());
-
-                    resp = inject_security_headers(resp, &security_headers);
+                    let resp = inject_security_headers(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", mime.as_str()),
+                        &upstream.security_headers,
+                    );
 
                     if mime.starts_with("text/html") {
                         if let Ok(body) = String::from_utf8(content.clone()) {
@@ -565,47 +667,90 @@ async fn handle_request(
                 }
             }
         }
+
+        // Anything that is not a GET/HEAD for a static file belongs to the application
+        // (PUT/PATCH/DELETE/OPTIONS/POST APIs, front-controller routes, PHP scripts).
+        let route_to_php = is_php_script
+            || !is_get
+            || (!is_file && !is_static_file(path));
+
+        if route_to_php {
+            match forward_to_php_worker(req, &request_path, remote_addr, &upstream).await {
+                Ok(response) => {
+                    slowloris_protection.mark_request_complete(remote_addr);
+                    return Ok(response);
+                }
+                Err(e) => {
+                    error!("PHP worker error: {}", e);
+                    return Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "text/html")
+                        .body(Full::new(Bytes::from(format!(
+                            "<h1>PHP Error</h1><p>{}</p>",
+                            e
+                        ))))
+                        .expect("valid 500 response"));
+                }
+            }
+        }
     }
 
     slowloris_protection.mark_request_complete(remote_addr);
     
-    let not_found_resp = inject_security_headers(
+    Ok(inject_security_headers(
         Response::builder()
             .status(StatusCode::NOT_FOUND)
             .header("Content-Type", "text/html"),
-        &security_headers,
+        &upstream.security_headers,
     )
     .body(Full::new(Bytes::from((*not_found_html).clone())))
-    .unwrap();
-    
-    Ok(not_found_resp)
+    .unwrap())
+}
+
+fn inject_security_headers(
+    mut builder: hyper::http::response::Builder,
+    headers: &SecurityHeaders,
+) -> hyper::http::response::Builder {
+    for (key, value) in headers.to_headers() {
+        builder = builder.header(&key, &value);
+    }
+    builder
 }
 
 fn inject_hmr_script(html: &str) -> String {
+    if html.contains("__cleanserve_hmr") {
+        return html.to_string();
+    }
     let script_tag = format!(r#"<script>{}</script>"#, HMR_CLIENT_SCRIPT);
-    if let Some(pos) = html.find("</body>") {
+    if let Some(pos) = html.to_ascii_lowercase().rfind("</body>") {
         format!("{}{}{}", &html[..pos], script_tag, &html[pos..])
     } else {
         format!("{}{}", html, script_tag)
     }
 }
 
-fn inject_security_headers(
-    builder: hyper::http::response::Builder,
-    headers: &SecurityHeaders,
-) -> hyper::http::response::Builder {
-    let sec_headers = headers.to_headers();
-    let mut builder = builder;
-    for (key, value) in sec_headers {
-        builder = builder.header(&key, &value);
-    }
-    builder
+/// Hop-by-hop headers must not be forwarded by a proxy (RFC 9110 §7.6.1).
+fn is_hop_by_hop(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "connection"
+            | "keep-alive"
+            | "proxy-authenticate"
+            | "proxy-authorization"
+            | "proxy-connection"
+            | "te"
+            | "trailer"
+            | "transfer-encoding"
+            | "upgrade"
+    )
 }
 
+/// Forward request to the PHP built-in server.
 async fn forward_to_php_worker(
     req: Request<hyper::body::Incoming>,
     rewritten_path: &str,
-    php_backend_port: u16,
+    remote_addr: SocketAddr,
+    upstream: &Upstream,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error>> {
     use http_body_util::BodyExt;
     use hyper_util::client::legacy::Client;
@@ -613,53 +758,89 @@ async fn forward_to_php_worker(
 
     let method = req.method().clone();
     let headers = req.headers().clone();
+    let uri = req.uri().clone();
 
-    let php_host = format!("127.0.0.1:{}", php_backend_port);
-    let php_url = format!("http://{}{}", php_host, rewritten_path);
+    let mut php_path = rewritten_path.to_string();
+    if let Some(query) = uri.query() {
+        if !query.is_empty() {
+            php_path.push('?');
+            php_path.push_str(query);
+        }
+    }
+
+    let php_url = format!("http://127.0.0.1:{}{}", upstream.php_port, php_path);
 
     // Collect request body
     let body_bytes = req.into_body().collect().await?.to_bytes();
 
-    // Create client and forward request
     let client = Client::builder(TokioExecutor::new()).build_http();
 
-    let mut php_req = hyper::Request::builder()
-        .method(method)
-        .uri(&php_url);
+    let mut php_req = hyper::Request::builder().method(method).uri(&php_url);
 
-    // Copy relevant headers
+    // Keep the client's Host so the app generates correct URLs/redirects,
+    // and tell it how the client actually reached us.
+    let original_host = headers.get("host").cloned();
     for (key, value) in headers.iter() {
-        if !key.as_str().starts_with("host") {
-            php_req = php_req.header(key, value);
+        let name = key.as_str();
+        if name.eq_ignore_ascii_case("host")
+            || name.eq_ignore_ascii_case("content-length")
+            || name.starts_with("x-forwarded-")
+            || is_hop_by_hop(name)
+        {
+            continue;
         }
+        php_req = php_req.header(key, value);
     }
-    php_req = php_req.header("Host", &php_host);
+    if let Some(host) = original_host {
+        php_req = php_req.header("Host", host.clone()).header("X-Forwarded-Host", host);
+    } else {
+        php_req = php_req.header("Host", format!("127.0.0.1:{}", upstream.php_port));
+    }
+    php_req = php_req
+        .header("X-Forwarded-For", remote_addr.ip().to_string())
+        .header("X-Forwarded-Proto", if upstream.https { "https" } else { "http" })
+        .header("Content-Length", body_bytes.len().to_string());
 
     let php_req = php_req.body(http_body_util::Full::new(body_bytes))?;
 
     let php_resp = client.request(php_req).await?;
 
-    // Build response to return
     let status = php_resp.status();
     let resp_headers = php_resp.headers().clone();
     let resp_body = php_resp.into_body().collect().await?.to_bytes();
 
     let mut builder = Response::builder().status(status);
     for (key, value) in resp_headers.iter() {
+        let name = key.as_str();
+        // Length is recomputed from the buffered body; hop-by-hop headers are not ours to forward.
+        // PHP's built-in server also echoes a bogus `Host:` response header (its own address).
+        if name.eq_ignore_ascii_case("content-length")
+            || name.eq_ignore_ascii_case("host")
+            || is_hop_by_hop(name)
+        {
+            continue;
+        }
         builder = builder.header(key, value);
     }
 
-    // Inject HMR script into HTML responses from PHP
-    let content_type = resp_headers
-        .get("content-type")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    // Inject the HMR script into plain (not compressed) HTML responses from PHP.
+    let header_str = |name: &str| {
+        resp_headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_ascii_lowercase()
+    };
+    let is_html = header_str("content-type").contains("text/html");
+    let is_encoded = {
+        let enc = header_str("content-encoding");
+        !enc.is_empty() && enc != "identity"
+    };
 
-    let final_body = if content_type.contains("text/html") {
-        if let Ok(html) = String::from_utf8(resp_body.to_vec()) {
-            Bytes::from(inject_hmr_script(&html))
-        } else {
-            resp_body
+    let final_body = if is_html && !is_encoded {
+        match String::from_utf8(resp_body.to_vec()) {
+            Ok(html) => Bytes::from(inject_hmr_script(&html)),
+            Err(_) => resp_body,
         }
     } else {
         resp_body
