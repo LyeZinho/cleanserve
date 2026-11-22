@@ -59,21 +59,26 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
     let skip_public_scaffold = layout.framework == cleanserve_core::framework::Framework::Yii2
         || Path::new("composer.json").exists();
 
+    // Internal pages (404/error) used by the dev server live in .cleanserve/pages/.
+    html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php_version)
+        .context("Failed to write default pages")?;
+
     let public_dir = Path::new("public");
+    let mut entrypoint = format!("{}/index.php", config.server.root.trim_end_matches('/'));
     if !skip_public_scaffold && !public_dir.exists() {
         std::fs::create_dir_all(public_dir)
             .context("Failed to create public/ directory")?;
-        
-        // Generate HTML pages based on quickstart flag
+
         if quickstart {
-            html_pages::write_quickstart_pages(&cleanserve_pages_dir, &project_name)
+            html_pages::write_quickstart_site(public_dir, &project_name)
                 .context("Failed to write quickstart pages")?;
+            entrypoint = "public/index.html".to_string();
+            println!("✓ Created public/ directory with quickstart pages");
         } else {
-            html_pages::write_default_pages(&cleanserve_pages_dir, &project_name, &php_version)
-                .context("Failed to write default pages")?;
+            html_pages::write_default_index_php(public_dir, &project_name)
+                .context("Failed to write public/index.php")?;
+            println!("✓ Created public/index.php");
         }
-        
-        println!("✓ Created public/ directory with HTML pages");
     }
 
     let gitignore_path = Path::new(".gitignore");
@@ -104,12 +109,11 @@ pub async fn run(name: Option<String>, php: String, quickstart: bool) -> anyhow:
         println!("  2. Run `cleanserve composer install`");
         println!("  3. Run `cleanserve up` and open https://localhost:{}", server_port);
     } else {
-        println!("  1. Edit {}/index.php with your application code", config.server.root.trim_end_matches('/'));
+        println!("  1. Edit {} with your application code", entrypoint);
         println!("  2. Run `cleanserve up` to start the server");
         println!("  3. Open https://localhost:{}", server_port);
     }
     println!();
-    println!("Tip: use the binary from this repo: cargo build --release && ./target/release/cleanserve");
     
     Ok(())
 }

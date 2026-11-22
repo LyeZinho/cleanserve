@@ -48,6 +48,6 @@ pub use slowloris::SlowlorisProtection;
 pub use project_php::{ensure_project_php, project_php_dir, validate_project_php};
 pub use project_layout::ProjectLayout;
 pub use dev_router::{ensure_dev_router, cleanserve_router_path};
-pub use composer_tool::ComposerTool;
-pub use runtime_telemetry::RuntimeTelemetry;
+pub use composer_tool::{ComposerBackend, ComposerTool};
+pub use runtime_telemetry::{RequestEntry, RuntimeTelemetry};
 pub use stack::{StackManager, ensure_docker, docker_available, teardown_all_for_project};

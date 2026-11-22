@@ -111,6 +111,21 @@ pub fn copy_line(line: &str) -> String {
     copy_text(line)
 }
 
+/// Open `url` in the default browser.
+pub fn open_url(url: &str) -> String {
+    #[cfg(target_os = "macos")]
+    let spawned = Command::new("open").arg(url).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    #[cfg(windows)]
+    let spawned = Command::new("cmd").args(["/C", "start", "", url]).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let spawned = Command::new("xdg-open").arg(url).stdout(Stdio::null()).stderr(Stdio::null()).spawn();
+
+    match spawned {
+        Ok(_) => format!("Opening {}", url),
+        Err(e) => format!("Could not open browser: {}", e),
+    }
+}
+
 fn set_clipboard(text: &str) -> Result<(), String> {
     if try_clip_command("wl-copy", &[], text).is_ok() {
         return Ok(());

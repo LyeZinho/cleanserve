@@ -2,7 +2,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(name = "cleanserve")]
-#[command(version = "0.3.0")]
+#[command(version)]
 #[command(about = "Zero-Burden PHP Runtime & Development Server")]
 pub struct Cli {
     #[command(subcommand)]
@@ -68,8 +68,8 @@ pub enum Commands {
     },
     /// Run Composer with project's PHP
     Composer {
-        /// Composer arguments (e.g., install, require package/name)
-        #[arg(trailing_var_arg = true)]
+        /// Composer arguments (e.g., install, require package/name, --version)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
     /// Run a PHP script with the project's PHP binary (e.g. init for Yii)
@@ -79,7 +79,7 @@ pub enum Commands {
     },
     /// Remove cleanserve.json and .cleanserve/ from this project
     Uninstall,
-    /// Check prerequisites (Docker, etc.)
+    /// Check your setup (PHP, Composer, optional Docker)
     Doctor,
     /// Install system dependencies for CleanServe
     Setup {

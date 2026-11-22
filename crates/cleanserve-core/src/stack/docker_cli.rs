@@ -65,7 +65,7 @@ pub fn compose_ps(compose_file: &Path, project_dir: &Path) -> Result<(), DockerE
 }
 
 fn compose_command(compose_file: &Path, project_dir: &Path) -> Command {
-    let mut cmd = if Command::new("docker")
+    let cmd = if Command::new("docker")
         .args(["compose", "version"])
         .output()
         .map(|o| o.status.success())

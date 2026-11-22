@@ -38,35 +38,49 @@ impl UpdateInstaller {
     }
 
     pub async fn install_binary(new_binary: &Path, target_location: &Path) -> Result<()> {
-        let parent = target_location.parent().ok_or_else(|| UpdateCheckerError {
+        Self::install_file(new_binary, target_location)
+    }
+
+    /// Copy `source` next to `target`, mark it executable and atomically move it into place.
+    fn install_file(source: &Path, target: &Path) -> Result<()> {
+        let parent = target.parent().ok_or_else(|| UpdateCheckerError {
             message: "Invalid target location".to_string(),
         })?;
-        
+
         std::fs::create_dir_all(parent).map_err(|e| UpdateCheckerError {
             message: format!("Failed to create target dir: {}", e),
         })?;
 
         let temp_target = parent.join(format!(".cleanserve.update.{}", std::process::id()));
-        
-        std::fs::copy(new_binary, &temp_target).map_err(|e| UpdateCheckerError {
+
+        std::fs::copy(source, &temp_target).map_err(|e| UpdateCheckerError {
             message: format!("Failed to copy new binary: {}", e),
         })?;
 
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&temp_target)
-                .map_err(|e| UpdateCheckerError {
-                    message: format!("Failed to read metadata: {}", e),
-                })?
-                .permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&temp_target, perms).map_err(|e| UpdateCheckerError {
-                message: format!("Failed to set permissions: {}", e),
-            })?;
+            if let Err(e) =
+                std::fs::set_permissions(&temp_target, std::fs::Permissions::from_mode(0o755))
+            {
+                let _ = std::fs::remove_file(&temp_target);
+                return Err(UpdateCheckerError {
+                    message: format!("Failed to set permissions: {}", e),
+                });
+            }
         }
 
-        std::fs::rename(&temp_target, target_location).map_err(|e| {
+        // Windows cannot overwrite a running executable, but it can rename it out of the way.
+        #[cfg(windows)]
+        {
+            let old = target.with_extension("old");
+            let _ = std::fs::remove_file(&old);
+            if target.exists() {
+                let _ = std::fs::rename(target, &old);
+            }
+        }
+
+        std::fs::rename(&temp_target, target).map_err(|e| {
             let _ = std::fs::remove_file(&temp_target);
             UpdateCheckerError {
                 message: format!("Failed to atomically replace binary: {}", e),
@@ -76,7 +90,7 @@ impl UpdateInstaller {
         Ok(())
     }
 
-    #[cfg(not(test))]
+    /// Run `<binary> --version`; the new binary must start and exit successfully.
     pub async fn verify_installation(binary_path: &Path) -> Result<()> {
         let output = tokio::process::Command::new(binary_path)
             .arg("--version")
@@ -91,27 +105,23 @@ impl UpdateInstaller {
                 message: format!("New binary failed execution check: {:?}", output.status),
             });
         }
-        
+
         Ok(())
     }
 
-    #[cfg(test)]
-    pub async fn verify_installation(binary_path: &Path) -> Result<()> {
-        if binary_path.to_string_lossy().contains("fail_verify") {
-            return Err(UpdateCheckerError {
-                message: "Simulated verification failure".into(),
-            });
-        }
-        Ok(())
-    }
-
+    /// Restore `backup_path` over `target_location`.
+    ///
+    /// The backup lives in `~/.cleanserve/backups`, usually another filesystem than the
+    /// installed binary, so a plain `rename` would fail with EXDEV. Copy next to the target
+    /// and rename into place instead (atomic, and the backup is kept).
     pub fn rollback(backup_path: &Path, target_location: &Path) -> Result<()> {
-        if backup_path.exists() {
-            std::fs::rename(backup_path, target_location).map_err(|e| UpdateCheckerError {
-                message: format!("Failed to rollback binary: {}", e),
-            })?;
+        if !backup_path.exists() {
+            return Ok(());
         }
-        Ok(())
+        Self::install_file(backup_path, target_location).map_err(|mut e| {
+            e.message = format!("Failed to rollback binary: {}", e.message);
+            e
+        })
     }
 
     pub fn cleanup_old_backups(backup_dir: Option<&Path>) -> Result<()> {
@@ -199,11 +209,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_installation() {
+    async fn test_verify_installation_fails_for_missing_binary() {
         let temp_dir = TempDir::new().unwrap();
-        let bin = temp_dir.path().join("fail_verify");
-        
-        let res = UpdateInstaller::verify_installation(&bin).await;
+        let res = UpdateInstaller::verify_installation(&temp_dir.path().join("nope")).await;
         assert!(res.is_err());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_verify_installation_runs_binary() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp_dir = TempDir::new().unwrap();
+
+        let ok = temp_dir.path().join("ok");
+        std::fs::write(&ok, "#!/bin/sh\necho cleanserve 9.9.9\n").unwrap();
+        std::fs::set_permissions(&ok, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(UpdateInstaller::verify_installation(&ok).await.is_ok());
+
+        let bad = temp_dir.path().join("bad");
+        std::fs::write(&bad, "#!/bin/sh\nexit 3\n").unwrap();
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(UpdateInstaller::verify_installation(&bad).await.is_err());
     }
 }

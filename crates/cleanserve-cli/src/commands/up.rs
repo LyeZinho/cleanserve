@@ -6,9 +6,10 @@ use cleanserve_core::{
 use cleanserve_proxy::{ProxyServer, HmrEvent, HmrState};
 use cleanserve_watcher::{FileWatcher, FileEvent};
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tracing::{info, error};
+use tracing::info;
 
 pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Result<()> {
     let project_root = std::env::current_dir().context("Cannot read current directory")?;
@@ -22,6 +23,8 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
         .context("Failed to load config")?;
 
     let port = port.unwrap_or(config.server.port);
+    let _pid_guard = super::pidfile::PidGuard::acquire(&project_root)?;
+    ensure_ports_free(port)?;
     let hot_reload = config.server.hot_reload;
     let php_version = config.engine.php.clone();
     let use_tls = config.server.tls && !http_only;
@@ -75,15 +78,23 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
 
     let hmr_state = Arc::new(RwLock::new(HmrState::new()));
 
+    let php_log = project_root.join(".cleanserve").join("php-server.log");
+    let _ = std::fs::remove_file(&php_log);
     let mut php_worker = if let Some(router) = router {
         PhpWorker::with_router(php_path.clone(), document_root.clone(), router)
     } else {
         PhpWorker::new(php_path.clone(), document_root.clone())
-    };
+    }
+    .with_log_file(php_log.clone());
     php_worker
         .start()
         .context("Failed to start PHP worker")?;
-    telemetry.push_log(format!("PHP worker on 127.0.0.1:9000 ({})", php_version));
+    telemetry.push_log(format!(
+        "PHP {} worker on 127.0.0.1:{} (log: {})",
+        php_version,
+        php_worker.port(),
+        ".cleanserve/php-server.log"
+    ));
 
     let tls_material: Option<(String, String)> = if use_tls {
         let ssl = SslManager::new().context("Failed to init SSL")?;
@@ -102,7 +113,8 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
         root.clone(),
         hmr_state.clone(),
         Some(telemetry.clone()),
-    );
+    )
+    .with_php_port(php_worker.port());
 
     let proxy_tls = tls_material.clone();
     let proxy_handle = tokio::spawn(async move {
@@ -165,22 +177,15 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
         None
     };
 
-    if no_tui {
+    let outcome = if no_tui {
         println!("\nCleanServe running at {}\nPress Ctrl+C to stop\n", url);
         tokio::select! {
-            _ = tokio::signal::ctrl_c() => {}
-            result = proxy_handle => {
-                if let Err(e) = result {
-                    error!("Proxy error: {}", e);
-                }
-            }
-            result = hmr_handle => {
-                if let Err(e) = result {
-                    error!("HMR server error: {}", e);
-                }
-            }
+            _ = shutdown_signal() => Ok(()),
+            result = proxy_handle => flatten("Proxy", result),
+            result = hmr_handle => flatten("HMR server", result),
         }
     } else {
+        let shutdown = Arc::new(AtomicBool::new(false));
         let dashboard_state = crate::tui::UpDashboardState {
             project_name: config.name.clone(),
             project_root: project_root.clone(),
@@ -190,33 +195,74 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
             framework: layout.framework.to_string(),
             hot_reload,
             telemetry: telemetry.clone(),
+            shutdown: shutdown.clone(),
         };
 
-        let tui_task = tokio::task::spawn_blocking(move || {
+        let mut tui_task = tokio::task::spawn_blocking(move || {
             crate::tui::run_up_dashboard(dashboard_state)
         });
 
-        tokio::select! {
-            result = tui_task => {
-                if let Err(e) = result {
-                    error!("TUI error: {}", e);
-                } else if let Err(e) = result.unwrap() {
-                    error!("TUI exited with error: {}", e);
+        let mut tui_finished = false;
+        let outcome = tokio::select! {
+            result = &mut tui_task => {
+                // The user quit from the dashboard.
+                tui_finished = true;
+                match result {
+                    Ok(inner) => inner,
+                    Err(e) => Err(anyhow::anyhow!("TUI task failed: {}", e)),
                 }
             }
-            result = proxy_handle => {
-                if let Err(e) = result {
-                    error!("Proxy error: {}", e);
-                }
-            }
-            result = hmr_handle => {
-                if let Err(e) = result {
-                    error!("HMR server error: {}", e);
-                }
-            }
+            _ = shutdown_signal() => Ok(()),
+            result = proxy_handle => flatten("Proxy", result),
+            result = hmr_handle => flatten("HMR server", result),
+        };
+
+        // Make sure the dashboard restores the terminal before we print anything or exit.
+        if !tui_finished {
+            shutdown.store(true, Ordering::SeqCst);
+            let _ = tui_task.await;
         }
-    }
+        outcome
+    };
 
     php_worker.stop();
+    outcome
+}
+
+/// Turn a finished server task into an error: a server task should only end on failure.
+fn flatten(name: &str, result: Result<anyhow::Result<()>, tokio::task::JoinError>) -> anyhow::Result<()> {
+    match result {
+        Ok(Ok(())) => Err(anyhow::anyhow!("{} stopped unexpectedly", name)),
+        Ok(Err(e)) => Err(e.context(format!("{} failed", name))),
+        Err(e) => Err(anyhow::anyhow!("{} task failed: {}", name, e)),
+    }
+}
+
+/// Resolves on Ctrl+C or (on Unix) SIGTERM, which is what `cleanserve down` sends.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        if let Ok(mut term) = signal(SignalKind::terminate()) {
+            tokio::select! {
+                _ = tokio::signal::ctrl_c() => {}
+                _ = term.recv() => {}
+            }
+            return;
+        }
+    }
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+/// Fail early with an actionable message instead of dying silently inside a spawned task.
+fn ensure_ports_free(port: u16) -> anyhow::Result<()> {
+    for (p, what) in [(port, "HTTP"), (port.saturating_add(1), "hot-reload WebSocket")] {
+        if let Err(e) = std::net::TcpListener::bind(("127.0.0.1", p)) {
+            anyhow::bail!(
+                "Port {} ({}) is not available: {}. Stop the other process or use `cleanserve up --port <PORT>`.",
+                p, what, e
+            );
+        }
+    }
     Ok(())
 }

@@ -311,7 +311,7 @@ checksum = "c8d4a3bb8b1e0c1050499d1815f5ab16d04f0959b233085fb31653fbfc9d98f9"
 
 [[package]]
 name = "cleanserve-bundle"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -338,9 +338,10 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "clap",
  "cleanserve-core",
  "cleanserve-proxy",
@@ -349,6 +350,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "ratatui",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -356,12 +358,13 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "byteorder",
  "cleanserve-shared",
  "dirs",
+ "flate2",
  "hostname",
  "libc",
  "rcgen",
@@ -371,6 +374,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tar",
  "tempfile",
  "thiserror 1.0.69",
  "time",
@@ -382,7 +386,7 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-inliner"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -395,7 +399,7 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-preload"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -411,7 +415,7 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-proxy"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bytes",
@@ -433,7 +437,7 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-shared"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "reqwest",
@@ -443,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-vfs"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "dirs",
@@ -462,7 +466,7 @@ dependencies = [
 
 [[package]]
 name = "cleanserve-watcher"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "notify",

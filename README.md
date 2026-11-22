@@ -34,18 +34,46 @@ Setting up a modern PHP environment shouldn't require a PhD in `.conf` files. Cl
 
 ## 📥 Installation
 
-Simply run the official installer (requires `curl` and `unzip`):
+Run the official installer (needs `curl` or `wget`, plus `tar`):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/LyeZinho/cleanserve/main/install.sh | sh
 ```
 
-**Docker** is required for Composer (when the bundled PHP has no `phar`) and for optional stack services. Install it with the installer or later:
+The download is verified against the release's `SHA256SUMS`. Useful options (append `-s -- <option>` when piping):
 
 ```bash
-CLEANSERVE_INSTALL_DOCKER=1 sh install.sh   # during install
-cleanserve setup docker                      # after install
-cleanserve doctor                            # verify prerequisites
+sh install.sh --version v0.3.1     # a specific release
+sh install.sh --dir ~/bin          # custom directory (default: /usr/local/bin, else ~/.local/bin)
+sh install.sh --docker             # also install Docker (optional)
+sh install.sh --purge              # also delete ~/.cleanserve (PHP runtimes, caches, certificates)
+sh install.sh --uninstall          # remove the binary (add --purge to remove its data too)
+```
+
+**Upgrading from an old version:** the installer checks every CleanServe it finds (the install directory and your `PATH`). Any copy older than the minimum compatible version (`MIN_COMPATIBLE` at the top of `install.sh`) is deleted and the new one installed, with no migration. Nothing is touched until the new download is verified and known to run, files that are not CleanServe are left alone, and your data in `~/.cleanserve` is kept unless you pass `--purge`. When a release breaks compatibility with earlier installs, raise `MIN_COMPATIBLE`.
+
+Building from source instead (e.g. after changing the code):
+
+```bash
+sh scripts/install-local.sh        # release build -> ~/.local/bin   (--debug for a debug build)
+```
+
+Then check your setup:
+
+```bash
+cleanserve doctor                  # PHP, Composer and (optional) Docker
+```
+
+**Docker is optional.** It is only used by `cleanserve stack` (MySQL, Redis, …) and as a last-resort fallback to run Composer. Install it any time with `cleanserve setup docker`.
+
+### Composer
+
+`cleanserve composer <args>` picks the first thing that works: `composer.phar` run by the project's PHP (downloaded once, SHA-256 verified) → a `composer` on your `PATH` → the `composer:2` Docker image.
+
+```bash
+cleanserve composer install
+cleanserve composer require monolog/monolog
+cleanserve composer --version
 ```
 
 -----
@@ -89,13 +117,37 @@ This will create a `cleanserve.json` file based on your `composer.json`.
 cleanserve up
 ```
 
-The server will be running at `https://localhost:8080`.
+The server will be running at `https://localhost:8080` (self-signed certificate: accept it once in the browser, or use `cleanserve up --http-only` for plain `http://`).
 
-### 3\. Switch PHP Version
+- A new project from `cleanserve init` has a working `public/index.php`; `cleanserve init --quickstart` creates a small static site plus a JSON endpoint at `/api/example`.
+- All HTTP methods (GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD) reach your PHP app with the original `Host` and `X-Forwarded-*` headers.
+- The `up` dashboard is one screen: your URL, a live request log (time, method, status, duration) and, on demand, server logs. Keys: `↑↓`/`PgUp`/`PgDn` scroll (auto-follow resumes with `End`), `c` copy the selected request, `o` open the site, `l` toggle logs, `m` more actions (Docker stack), `q` quit. Use `--no-tui` for plain output (CI, pipes).
+- The PHP server runs on a free local port; its request log is written to `.cleanserve/php-server.log`.
+- Only one server runs per project. If the port is busy, `up` tells you and exits; use `--port` to pick another.
+
+### 3\. Stop the Server
+
+Press `q` / `Ctrl+C` in the dashboard (or with `--no-tui`), or from another terminal:
+
+```bash
+cleanserve down
+```
+
+### 4\. Switch PHP Version
 
 ```bash
 cleanserve use 8.5
 ```
+
+### 5\. Update CleanServe
+
+```bash
+cleanserve update --check   # is a newer release available?
+cleanserve update           # download, verify (SHA-256), install, roll back on failure
+cleanserve update -v 8.4    # install a PHP version instead
+```
+
+Updates are verified against the `SHA256SUMS` published with each GitHub release. Set `GITHUB_TOKEN` if you hit the anonymous GitHub API rate limit.
 
 -----
 
