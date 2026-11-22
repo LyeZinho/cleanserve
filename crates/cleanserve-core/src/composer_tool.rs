@@ -102,6 +102,33 @@ impl ComposerTool {
         None
     }
 
+    /// A Composer that does not need the project PHP: a `composer` on `PATH`, else the
+    /// `composer:2` Docker image. Used when no available PHP has the extensions Composer needs.
+    pub fn detect_external_backend() -> Option<ComposerBackend> {
+        if let Some(path) = find_in_path("composer") {
+            return Some(ComposerBackend::System(path));
+        }
+        if Self::docker_available() {
+            return Some(ComposerBackend::Docker);
+        }
+        None
+    }
+
+    /// Run Composer through a backend from [`detect_external_backend`](Self::detect_external_backend).
+    pub fn run_external(
+        backend: &ComposerBackend,
+        project_root: &Path,
+        args: &[String],
+    ) -> Result<i32> {
+        match backend {
+            ComposerBackend::System(path) => Self::run_via_system(path, project_root, args),
+            ComposerBackend::Docker => Self::run_via_docker(project_root, args),
+            ComposerBackend::Phar => Err(CleanServeError::Config(
+                "the phar backend needs a project PHP".into(),
+            )),
+        }
+    }
+
     pub async fn ensure_phar() -> Result<PathBuf> {
         let dest = Self::phar_path()?;
         if dest.exists() {

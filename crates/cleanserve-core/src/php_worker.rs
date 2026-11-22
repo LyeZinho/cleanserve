@@ -1,11 +1,13 @@
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::{Path, PathBuf};
+use crate::find_available_port;
+use std::net::{SocketAddr, TcpStream};
+use std::path::PathBuf;
 use std::process::{Child, Stdio};
 use std::time::{Duration, Instant};
 use tracing::info;
 
-/// Default upstream port used before a worker picks a free one.
+/// First port tried for the PHP built-in server.
 pub const DEFAULT_PHP_PORT: u16 = 9000;
+const PORT_SCAN: u16 = 200;
 
 const READY_TIMEOUT: Duration = Duration::from_secs(10);
 const READY_POLL: Duration = Duration::from_millis(50);
@@ -14,6 +16,7 @@ pub struct PhpWorker {
     php_path: PathBuf,
     root: PathBuf,
     router: Option<PathBuf>,
+    php_ini: Option<PathBuf>,
     log_path: Option<PathBuf>,
     port: u16,
     child: Option<Child>,
@@ -25,16 +28,24 @@ impl PhpWorker {
             php_path,
             root,
             router: None,
+            php_ini: None,
             log_path: None,
-            port: 0,
+            port: DEFAULT_PHP_PORT,
             child: None,
         }
     }
 
+    /// Use `router` as the front controller script of the built-in server.
     pub fn with_router(php_path: PathBuf, root: PathBuf, router: PathBuf) -> Self {
         let mut worker = Self::new(php_path, root);
         worker.router = Some(router);
         worker
+    }
+
+    /// Run PHP with this `php.ini` (`php -c`).
+    pub fn with_php_ini(mut self, ini_path: PathBuf) -> Self {
+        self.php_ini = Some(ini_path);
+        self
     }
 
     /// Append the PHP built-in server output (request log, errors) to this file.
@@ -46,43 +57,48 @@ impl PhpWorker {
         self
     }
 
-    /// Port the PHP built-in server listens on (valid after [`start`](Self::start)).
+    /// Port the PHP built-in server listens on (valid after a successful start).
     pub fn port(&self) -> u16 {
-        if self.port == 0 {
-            DEFAULT_PHP_PORT
-        } else {
-            self.port
-        }
+        self.port
     }
 
     pub fn start(&mut self) -> anyhow::Result<()> {
-        let router = self.router.clone();
-        self.start_with_router(router.as_deref())
+        self.start_on_port(DEFAULT_PHP_PORT)?;
+        Ok(())
     }
 
-    pub fn start_with_router(&mut self, router: Option<&Path>) -> anyhow::Result<()> {
+    /// Start the built-in server on `preferred_port`, or the next free port. Returns the port used.
+    pub fn start_on_port(&mut self, preferred_port: u16) -> anyhow::Result<u16> {
         self.stop();
 
-        if self.port == 0 {
-            self.port = pick_free_port()?;
+        let port = find_available_port(preferred_port, PORT_SCAN).ok_or_else(|| {
+            anyhow::anyhow!(
+                "No free TCP port found for PHP worker (tried {}..{})",
+                preferred_port,
+                preferred_port.saturating_add(PORT_SCAN - 1)
+            )
+        })?;
+        if port != preferred_port {
+            info!("PHP port {} in use, using {} for built-in server", preferred_port, port);
         }
-        let addr = format!("127.0.0.1:{}", self.port);
 
-        info!("🔄 Starting PHP worker: {}", self.php_path.display());
+        info!("🔄 Starting PHP worker: {} on 127.0.0.1:{}", self.php_path.display(), port);
 
         let mut cmd = std::process::Command::new(&self.php_path);
+        if let Some(ini) = &self.php_ini {
+            cmd.arg("-c").arg(ini);
+        }
         cmd.args([
             "-S",
-            addr.as_str(),
+            &format!("127.0.0.1:{}", port),
             "-t",
             self.root.to_str().unwrap_or("."),
-            "-d",
-            "variables_order=EGPCS",
-            "-d",
-            "cgi.fix_pathinfo=1",
         ]);
-
-        if let Some(router) = router {
+        if self.php_ini.is_none() {
+            // A generated php.ini already sets these; without one, keep the same behaviour.
+            cmd.args(["-d", "variables_order=EGPCS", "-d", "cgi.fix_pathinfo=1"]);
+        }
+        if let Some(router) = &self.router {
             cmd.arg(router);
             info!("Using front-controller router: {}", router.display());
         }
@@ -92,10 +108,7 @@ impl PhpWorker {
                 if let Some(parent) = path.parent() {
                     std::fs::create_dir_all(parent)?;
                 }
-                let file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)?;
+                let file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
                 Stdio::from(file)
             }
             None => Stdio::null(),
@@ -107,6 +120,7 @@ impl PhpWorker {
             .stderr(stderr)
             .spawn()?;
 
+        self.port = port;
         self.child = Some(child);
 
         if let Err(e) = self.wait_until_ready() {
@@ -114,8 +128,8 @@ impl PhpWorker {
             return Err(e);
         }
 
-        info!("✅ PHP worker started on {}", addr);
-        Ok(())
+        info!("✅ PHP worker started on port {}", port);
+        Ok(port)
     }
 
     /// Block until the PHP server accepts connections, or fail if it exited / timed out.
@@ -140,6 +154,21 @@ impl PhpWorker {
             }
 
             if TcpStream::connect_timeout(&addr, READY_POLL).is_ok() {
+                // Something answers, but is it *our* server? If another process grabbed the port
+                // after we picked it, PHP exits at once with "address in use" while the connect
+                // above succeeded against the other process. Give it a moment, then confirm
+                // our child is still alive.
+                std::thread::sleep(Duration::from_millis(40));
+                if let Some(child) = self.child.as_mut() {
+                    if let Some(status) = child.try_wait()? {
+                        anyhow::bail!(
+                            "PHP server exited right after startup ({}); port {} may have been taken by another process.{}",
+                            status,
+                            self.port,
+                            log_hint
+                        );
+                    }
+                }
                 return Ok(());
             }
 
@@ -178,22 +207,10 @@ impl Drop for PhpWorker {
     }
 }
 
-/// Ask the OS for a currently free loopback port.
-fn pick_free_port() -> std::io::Result<u16> {
-    let listener = TcpListener::bind(("127.0.0.1", 0))?;
-    Ok(listener.local_addr()?.port())
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn pick_free_port_returns_bindable_port() {
-        let port = pick_free_port().unwrap();
-        assert_ne!(port, 0);
-        TcpListener::bind(("127.0.0.1", port)).expect("port should be free again");
-    }
 
     #[test]
     fn port_defaults_before_start() {

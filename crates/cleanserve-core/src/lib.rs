@@ -4,6 +4,8 @@ pub mod php_downloader;
 pub mod version_manifest;
 pub mod php_worker;
 pub mod extension_manager;
+pub mod project_php;
+pub mod ports;
 pub mod ssl;
 pub mod fastcgi;
 pub mod environment;
@@ -18,21 +20,23 @@ pub mod path_traversal;
 pub mod slowloris;
 pub mod package_manager;
 pub mod auto_updater;
-pub mod project_php;
 pub mod project_layout;
 pub mod composer_tool;
 pub mod runtime_telemetry;
 pub mod php_runtime;
 pub mod dev_router;
 pub mod stack;
+pub mod url_validator;
 
 pub use cleanserve_shared::{CleanServeError, Result};
 pub use config::{CleanServeConfig, EngineConfig, ServerConfig};
-pub use php_manager::PhpManager;
+pub use php_manager::{cleanserve_home, find_php_binary, PhpManager};
 pub use php_downloader::PhpDownloader;
 pub use version_manifest::{VersionManifest, PhpVersion, PlatformBinary};
 pub use php_worker::PhpWorker;
 pub use extension_manager::ExtensionManager;
+pub use project_php::{prepare_project_php_ini, ProjectPhpRuntime};
+pub use ports::{find_available_port, find_server_ports, is_port_available};
 pub use ssl::SslManager;
 pub use fastcgi::{FastCgiClient, FastCgiPool, FastCgiResponse};
 pub use environment::{build_php_environment, resolve_request_path, is_static_file, extract_filename};
@@ -45,9 +49,12 @@ pub use error_overlay::{PhpError, StackFrame, parse_php_error, vscode_link, jetb
 pub use static_blacklist::StaticBlacklist;
 pub use path_traversal::PathTraversal;
 pub use slowloris::SlowlorisProtection;
-pub use project_php::{ensure_project_php, project_php_dir, validate_project_php};
+pub use project_php::{
+    ensure_project_php, project_php_dir, resolve_dev_php, validate_project_php, DevPhp,
+};
 pub use project_layout::ProjectLayout;
 pub use dev_router::{ensure_dev_router, cleanserve_router_path};
 pub use composer_tool::{ComposerBackend, ComposerTool};
 pub use runtime_telemetry::{RequestEntry, RuntimeTelemetry};
 pub use stack::{StackManager, ensure_docker, docker_available, teardown_all_for_project};
+pub use url_validator::{UrlValidator, UrlValidationError};

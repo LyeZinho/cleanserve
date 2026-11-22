@@ -10,12 +10,20 @@ This guide provides the steps to set up a local development environment for Clea
 
 ## Installation
 
-Clone the repository and navigate into the project directory:
+Clone the repository **with submodules** (includes `php-runtimes/`):
 
 ```bash
-git clone https://github.com/LyeZinho/cleanserve.git
+git clone --recurse-submodules https://github.com/LyeZinho/cleanserve.git
 cd cleanserve
 ```
+
+If you already cloned without submodules:
+
+```bash
+git submodule update --init --recursive
+```
+
+See [php-runtimes submodule](./php-runtimes-submodule.md) for how to develop both repos together.
 
 ## Building
 

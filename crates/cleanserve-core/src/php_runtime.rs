@@ -8,21 +8,17 @@ use tracing::{info, warn};
 /// Modules required for typical web apps (Yii, Laravel, Symfony, …).
 pub const DEV_BASELINE_MODULES: &[&str] = &["session", "phar", "mbstring", "openssl"];
 
+/// Shared directory for downloaded PHP runtimes (`~/.cleanserve/php`, or `$CLEANSERVE_HOME/php`).
+/// Same location `PhpManager`/`PhpDownloader::global()` use, so every command agrees.
 pub fn shared_runtimes_dir() -> Result<PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| CleanServeError::Config("Cannot find home directory".into()))?
-        .join(".cleanserve")
-        .join("runtimes");
+    let dir = crate::php_manager::PhpManager::global_php_dir()?;
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
 
+/// Directory of older, manually installed full runtimes (`~/.cleanserve/bin`).
 pub fn legacy_global_bin_dir() -> Result<PathBuf> {
-    let dir = dirs::home_dir()
-        .ok_or_else(|| CleanServeError::Config("Cannot find home directory".into()))?
-        .join(".cleanserve")
-        .join("bin");
-    Ok(dir)
+    Ok(crate::php_manager::cleanserve_home()?.join("bin"))
 }
 
 pub fn list_loaded_modules(php_bin: &Path) -> Vec<String> {

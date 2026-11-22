@@ -1,4 +1,5 @@
 use super::{Result, UpdateCheckerError, UpdateInfo};
+use crate::UrlValidator;
 use semver::Version;
 use serde::Deserialize;
 
@@ -71,7 +72,12 @@ impl UpdateChecker {
     }
 
     async fn fetch_latest_release() -> Result<GitHubRelease> {
+        UrlValidator::new()
+            .validate_url(LATEST_RELEASE_URL)
+            .map_err(|e| err(format!("URL validation failed: {:?}", e)))?;
+
         let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .user_agent(format!("cleanserve-updater/{}", env!("CARGO_PKG_VERSION")))
             .timeout(std::time::Duration::from_secs(20))
             .build()

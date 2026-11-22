@@ -1,8 +1,15 @@
 use clap::{Parser, Subcommand};
 
+const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (",
+    env!("CLEANSERVE_GIT_HASH"),
+    ")"
+);
+
 #[derive(Parser)]
 #[command(name = "cleanserve")]
-#[command(version)]
+#[command(version = VERSION)]
 #[command(about = "Zero-Burden PHP Runtime & Development Server")]
 pub struct Cli {
     #[command(subcommand)]
@@ -13,18 +20,15 @@ pub struct Cli {
 pub enum Commands {
     /// Initialize a new CleanServe project
     Init {
-        /// Project name (defaults to directory name)
+        /// Project name (defaults to composer.json name or directory name)
         #[arg(short, long)]
         name: Option<String>,
-        /// PHP version to use
-        #[arg(short, long, default_value = "8.4")]
-        php: String,
+        /// PHP version to use (defaults to composer.json require.php or 8.4)
+        #[arg(short, long)]
+        php: Option<String>,
         /// Generate quickstart pages
         #[arg(long)]
         quickstart: bool,
-        /// Only add cleanserve.json to an existing repo (Yii/Laravel/etc.)
-        #[arg(long)]
-        existing: bool,
     },
     /// Start the development server
     Up {
@@ -54,26 +58,38 @@ pub enum Commands {
         #[arg(long)]
         installed: bool,
     },
-    /// Download and install PHP version, or check for CleanServe updates
+    /// Download and install a PHP version, or update CleanServe itself with --self
     Update {
-        /// PHP version to download (e.g., 8.4, 8.3)
+        /// PHP version to download (e.g., 8.4, 8.3). Defaults to the project version.
         #[arg(short, long)]
         version: Option<String>,
-        /// Check for CleanServe updates instead of PHP
+        /// Update CleanServe itself (download, verify SHA-256, install, roll back on failure)
+        #[arg(long = "self")]
+        self_update: bool,
+        /// Only check whether a newer CleanServe release exists
         #[arg(long)]
         check: bool,
-        /// Force update even if versions match
+        /// Reinstall CleanServe even if already up to date (with --self)
         #[arg(long)]
         force: bool,
     },
-    /// Run Composer with project's PHP
+    /// Run Composer with the project's PHP
+    #[command(disable_version_flag = true)]
     Composer {
-        /// Composer arguments (e.g., install, require package/name, --version)
+        /// PHP version when no cleanserve.json exists
+        #[arg(long)]
+        php: Option<String>,
+        /// Composer arguments (e.g., install, require package/name)
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
-    /// Run a PHP script with the project's PHP binary (e.g. init for Yii)
+    /// Run PHP with the project's interpreter
+    #[command(disable_version_flag = true)]
     Php {
+        /// PHP version when no cleanserve.json exists
+        #[arg(long)]
+        php: Option<String>,
+        /// Arguments passed to the PHP CLI
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
@@ -168,13 +184,12 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(tui_quiet_tracing);
 
     match cli.command {
-        Commands::Init { name, php, quickstart, existing } => {
-            if existing || std::path::Path::new("composer.json").exists() && !std::path::Path::new("cleanserve.json").exists() {
-                let root = std::env::current_dir()?;
-                commands::project_config::adopt_existing_project(&root, name, Some(php)).await?;
-            } else {
-                commands::init::run(name, php, quickstart).await?;
-            }
+        Commands::Init {
+            name,
+            php,
+            quickstart,
+        } => {
+            commands::init::run(name, php, quickstart).await?;
         }
         Commands::Up { port, no_tui, http_only } => {
             commands::up::run(port, no_tui, http_only).await?;
@@ -188,18 +203,23 @@ async fn main() -> anyhow::Result<()> {
         Commands::List { refresh, installed } => {
             commands::list::run(refresh, installed).await?;
         }
-        Commands::Update { version, check, force } => {
-            if check || version.is_none() {
+        Commands::Update {
+            version,
+            self_update,
+            check,
+            force,
+        } => {
+            if check || self_update {
                 commands::update::run_cleanserve_update(check, force).await?;
             } else {
                 commands::update::run_php_update(version).await?;
             }
         }
-        Commands::Composer { args } => {
-            commands::composer::run(args).await?;
+        Commands::Composer { php, args } => {
+            commands::composer::run(args, php).await?;
         }
-        Commands::Php { args } => {
-            commands::php::run(args).await?;
+        Commands::Php { php, args } => {
+            commands::php::run(args, php).await?;
         }
         Commands::Uninstall => {
             commands::uninstall::run().await?;
@@ -222,12 +242,12 @@ async fn main() -> anyhow::Result<()> {
             let project_root = std::env::current_dir()?;
             match action {
                 PackageAction::Add { name, version } => {
-                    commands::package::PackageCommand::add(&name, version.as_deref(), &project_root).await
+                    commands::package::PackageCommand::add(&name, version.as_deref(), &project_root)
+                        .await
                         .map_err(|e| anyhow::anyhow!(e))?;
                 }
                 PackageAction::List => {
-                    commands::package::PackageCommand::list()
-                        .map_err(|e| anyhow::anyhow!(e))?;
+                    commands::package::PackageCommand::list().map_err(|e| anyhow::anyhow!(e))?;
                 }
                 PackageAction::Info { name } => {
                     commands::package::PackageCommand::info(&name)
@@ -248,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }
 

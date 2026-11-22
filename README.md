@@ -111,6 +111,14 @@ cleanserve init
 
 This will create a `cleanserve.json` file based on your `composer.json`.
 
+To scaffold a new app (Yii, Laravel, Symfony, …) without a system PHP:
+
+```bash
+cleanserve composer create-project yiisoft/app your_project
+cd your_project
+cleanserve up
+```
+
 ### 2\. Spin Up the Server
 
 ```bash
@@ -142,9 +150,10 @@ cleanserve use 8.5
 ### 5\. Update CleanServe
 
 ```bash
-cleanserve update --check   # is a newer release available?
-cleanserve update           # download, verify (SHA-256), install, roll back on failure
-cleanserve update -v 8.4    # install a PHP version instead
+cleanserve update --check   # is a newer CleanServe release available?
+cleanserve update --self    # update CleanServe: download, verify (SHA-256), install, roll back on failure
+cleanserve update           # install the PHP version from cleanserve.json (or 8.4)
+cleanserve update -v 8.4    # install a specific PHP version
 ```
 
 Updates are verified against the `SHA256SUMS` published with each GitHub release. Set `GITHUB_TOKEN` if you hit the anonymous GitHub API rate limit.
@@ -178,7 +187,7 @@ The brain of your development environment:
   * **Core:** Written in **Rust** for maximum performance and portability (static binary).
   * **Proxy:** An ultra-lightweight reverse proxy that intercepts requests and injects the reload script only into `text/html` responses.
   * **Watcher:** Native OS monitoring to detect file changes with zero latency.
-  * **Runtime:** Official PHP (NTS binaries) managed in isolation within `~/.cleanserve`.
+  * **Runtime:** Official PHP (NTS binaries from [php-runtimes](https://github.com/LyeZinho/php-runtimes)) cached in `~/.cleanserve/php`. The runtime repo is a [git submodule](./docs/contributing/php-runtimes-submodule.md) at `php-runtimes/`.
 
 -----
 

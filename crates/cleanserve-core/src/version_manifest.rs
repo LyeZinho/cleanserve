@@ -1,4 +1,4 @@
-use crate::{CleanServeError, Result};
+use crate::{CleanServeError, Result, UrlValidator};
 use serde::Deserialize;
 use std::path::PathBuf;
 use tracing::{info, warn};
@@ -102,7 +102,13 @@ impl VersionManifest {
 
         // Fetch from remote
         info!("Fetching version manifest from {}", MANIFEST_URL);
+        
+        let validator = UrlValidator::new();
+        validator.validate_url(MANIFEST_URL)
+            .map_err(|e| CleanServeError::Download(format!("URL validation failed: {:?}", e)))?;
+
         let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .map_err(|e| CleanServeError::Download(format!("HTTP client error: {}", e)))?;
@@ -178,14 +184,16 @@ impl VersionManifest {
             .max_by(|a, b| version_cmp(&a.version, &b.version))
     }
 
-    /// Get platform binary for a resolved version
+    /// Get platform binary for a resolved version.
+    ///
+    /// Accepts aliases so `"linux"` matches `"linux-x64"` and vice versa.
     pub fn get_platform_binary(&self, version: &str, platform: &str) -> Option<&PlatformBinary> {
         self.versions
             .iter()
             .find(|v| v.version == version)?
             .platforms
             .iter()
-            .find(|p| p.platform == platform)
+            .find(|p| platform_matches(&p.platform, platform))
     }
 
     /// All available versions, sorted newest first
@@ -197,7 +205,7 @@ impl VersionManifest {
 }
 
 /// Compare semver-like version strings (e.g., "8.4.19" vs "8.4.2")
-fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
+pub fn version_cmp(a: &str, b: &str) -> std::cmp::Ordering {
     parse_version_parts(a).cmp(&parse_version_parts(b))
 }
 
@@ -264,5 +272,34 @@ mod version_resolve_tests {
     fn resolve_eol_minor_to_newer_compatible() {
         let m = sample_manifest();
         assert_eq!(m.resolve_version("8.2").unwrap().version, "8.4.19");
+    }
+}
+
+fn platform_matches(manifest_platform: &str, requested: &str) -> bool {
+    let normalize = |s: &str| s.replace('_', "-").to_ascii_lowercase();
+    let a = normalize(manifest_platform);
+    let b = normalize(requested);
+    if a == b {
+        return true;
+    }
+
+    const LINUX: &[&str] = &["linux", "linux-x64", "linux-x86-64", "linux-amd64"];
+    const MACOS: &[&str] = &["macos", "darwin", "macos-arm64", "macos-aarch64", "macos-x64"];
+    const WINDOWS: &[&str] = &["windows", "windows-x64", "win", "win-x64"];
+
+    (LINUX.contains(&a.as_str()) && LINUX.contains(&b.as_str()))
+        || (MACOS.contains(&a.as_str()) && MACOS.contains(&b.as_str()))
+        || (WINDOWS.contains(&a.as_str()) && WINDOWS.contains(&b.as_str()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linux_platform_aliases_match() {
+        assert!(platform_matches("linux-x64", "linux"));
+        assert!(platform_matches("linux", "linux-x64"));
+        assert!(!platform_matches("macos", "linux"));
     }
 }

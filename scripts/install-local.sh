@@ -26,6 +26,11 @@ fi
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 
+# Some setups have no `x86_64-linux-gnu-gcc` cross-linker name: fall back to plain `gcc`.
+if [ -z "${CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER:-}" ] && ! command -v x86_64-linux-gnu-gcc >/dev/null 2>&1; then
+  export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER=gcc
+fi
+
 echo "Building cleanserve ($PROFILE)..."
 # shellcheck disable=SC2086
 cargo build $PROFILE_FLAG -p cleanserve-cli --manifest-path "$ROOT/Cargo.toml" --target-dir "$ROOT/target"

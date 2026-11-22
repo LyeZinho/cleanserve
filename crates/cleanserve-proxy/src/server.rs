@@ -1,6 +1,6 @@
 use cleanserve_core::{
     RateLimiter, RequestValidator, StaticBlacklist, PathTraversal, SlowlorisProtection,
-    RequestEntry, RuntimeTelemetry, is_static_file,
+    RequestEntry, RuntimeTelemetry, SecurityHeaders, is_static_file,
 };
 use cleanserve_core::php_worker::DEFAULT_PHP_PORT;
 use futures_util::{SinkExt, StreamExt};
@@ -110,13 +110,17 @@ pub struct ProxyServer {
     not_found_html: Arc<String>,
     telemetry: Option<Arc<RuntimeTelemetry>>,
     php_port: u16,
+    security_headers: SecurityHeaders,
+    tls_cert: Option<PathBuf>,
+    tls_key: Option<PathBuf>,
 }
 
 /// Where requests are forwarded and how the client reached us.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct Upstream {
     php_port: u16,
     https: bool,
+    security_headers: SecurityHeaders,
 }
 
 /// Max time a client may take to send the request headers (real slowloris defense).
@@ -135,12 +139,27 @@ impl ProxyServer {
             not_found_html: Arc::new(not_found_html),
             telemetry: None,
             php_port: DEFAULT_PHP_PORT,
+            security_headers: SecurityHeaders::default(),
+            tls_cert: None,
+            tls_key: None,
         }
     }
 
     /// Port of the PHP built-in server requests are forwarded to.
     pub fn with_php_port(mut self, php_port: u16) -> Self {
         self.php_port = php_port;
+        self
+    }
+
+    /// Alias of [`with_php_port`](Self::with_php_port).
+    pub fn with_php_backend(self, port: u16) -> Self {
+        self.with_php_port(port)
+    }
+
+    /// Terminate TLS on the proxy (self-signed or custom cert) when started with [`start`](Self::start).
+    pub fn with_tls(mut self, cert_path: PathBuf, key_path: PathBuf) -> Self {
+        self.tls_cert = Some(cert_path);
+        self.tls_key = Some(key_path);
         self
     }
 
@@ -166,6 +185,9 @@ impl ProxyServer {
             not_found_html: Arc::new(not_found_html),
             telemetry,
             php_port: DEFAULT_PHP_PORT,
+            security_headers: SecurityHeaders::default(),
+            tls_cert: None,
+            tls_key: None,
         }
     }
 
@@ -185,7 +207,12 @@ impl ProxyServer {
     }
 
     pub async fn start(&self) -> anyhow::Result<()> {
-        self.start_with_tls_paths(None, None).await
+        match (&self.tls_cert, &self.tls_key) {
+            (Some(cert), Some(key)) => {
+                self.start_with_tls_paths(cert.to_str(), key.to_str()).await
+            }
+            _ => self.start_with_tls_paths(None, None).await,
+        }
     }
 
     pub async fn start_https(&self, cert_path: &str, key_path: &str) -> anyhow::Result<()> {
@@ -225,7 +252,11 @@ impl ProxyServer {
                     let tls_acceptor = tls_acceptor.clone();
                     let php_port = self.php_port;
                     let https = tls_acceptor.is_some();
-                    let upstream = Upstream { php_port, https };
+                    let upstream = Upstream {
+                        php_port,
+                        https,
+                        security_headers: self.security_headers.clone(),
+                    };
 
                     let slowloris_cleanup = Arc::clone(&slowloris_protection);
                     slowloris_protection.register_connection(remote_addr);
@@ -253,7 +284,7 @@ impl ProxyServer {
                                 let slowloris_protection = Arc::clone(&slowloris_protection);
                                 let not_found_html = Arc::clone(&not_found_html);
                                 let telemetry = telemetry.clone();
-                                handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry, upstream)
+                                handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry, upstream.clone())
                             });
                             if let Err(e) = http1::Builder::new()
                                 .timer(TokioTimer::new())
@@ -279,7 +310,7 @@ impl ProxyServer {
                                 let slowloris_protection = Arc::clone(&slowloris_protection);
                                 let not_found_html = Arc::clone(&not_found_html);
                                 let telemetry = telemetry.clone();
-                                handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry, upstream)
+                                handle_request(req, root, hmr_state, rate_limiter, request_validator, slowloris_protection, remote_addr, not_found_html, telemetry, upstream.clone())
                             });
                             if let Err(e) = http1::Builder::new()
                                 .timer(TokioTimer::new())
@@ -614,9 +645,12 @@ async fn handle_request_inner(
 
                     info!("📄 Serving static file: {} (mime: {})", file_path.display(), mime);
 
-                    let resp = Response::builder()
-                        .status(StatusCode::OK)
-                        .header("Content-Type", mime.as_str());
+                    let resp = inject_security_headers(
+                        Response::builder()
+                            .status(StatusCode::OK)
+                            .header("Content-Type", mime.as_str()),
+                        &upstream.security_headers,
+                    );
 
                     if mime.starts_with("text/html") {
                         if let Ok(body) = String::from_utf8(content.clone()) {
@@ -641,7 +675,7 @@ async fn handle_request_inner(
             || (!is_file && !is_static_file(path));
 
         if route_to_php {
-            match forward_to_php_worker(req, &request_path, remote_addr, upstream).await {
+            match forward_to_php_worker(req, &request_path, remote_addr, &upstream).await {
                 Ok(response) => {
                     slowloris_protection.mark_request_complete(remote_addr);
                     return Ok(response);
@@ -663,11 +697,24 @@ async fn handle_request_inner(
 
     slowloris_protection.mark_request_complete(remote_addr);
     
-    Ok(Response::builder()
-        .status(StatusCode::NOT_FOUND)
-        .header("Content-Type", "text/html")
-        .body(Full::new(Bytes::from((*not_found_html).clone())))
-        .unwrap())
+    Ok(inject_security_headers(
+        Response::builder()
+            .status(StatusCode::NOT_FOUND)
+            .header("Content-Type", "text/html"),
+        &upstream.security_headers,
+    )
+    .body(Full::new(Bytes::from((*not_found_html).clone())))
+    .unwrap())
+}
+
+fn inject_security_headers(
+    mut builder: hyper::http::response::Builder,
+    headers: &SecurityHeaders,
+) -> hyper::http::response::Builder {
+    for (key, value) in headers.to_headers() {
+        builder = builder.header(&key, &value);
+    }
+    builder
 }
 
 fn inject_hmr_script(html: &str) -> String {
@@ -703,7 +750,7 @@ async fn forward_to_php_worker(
     req: Request<hyper::body::Incoming>,
     rewritten_path: &str,
     remote_addr: SocketAddr,
-    upstream: Upstream,
+    upstream: &Upstream,
 ) -> Result<Response<Full<Bytes>>, Box<dyn std::error::Error>> {
     use http_body_util::BodyExt;
     use hyper_util::client::legacy::Client;

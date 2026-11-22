@@ -1,4 +1,5 @@
 use super::{Result, UpdateCheckerError};
+use crate::UrlValidator;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
@@ -14,14 +15,36 @@ impl BinaryDownloader {
     /// Download `download_url` to `dest_path`, verifying it against the entry for the same
     /// file name in the `SHA256SUMS` document at `checksum_url`.
     /// On any failure (network, checksum mismatch) the partial file is removed.
+    ///
+    /// Both URLs must pass the SSRF [`UrlValidator`] (allowlisted hosts, no private/loopback
+    /// addresses), and so must every redirect hop: GitHub release downloads always redirect to
+    /// its CDN, so redirects are followed but only to hosts the validator accepts.
     pub async fn download_release(
         download_url: &str,
         checksum_url: &str,
         dest_path: &Path,
     ) -> Result<()> {
-        let expected_checksum = Self::fetch_checksum(checksum_url, download_url).await?;
+        let validator = UrlValidator::new();
+        for url in [download_url, checksum_url] {
+            validator
+                .validate_url(url)
+                .map_err(|e| err(format!("URL validation failed: {:?}", e)))?;
+        }
+        Self::download_release_inner(download_url, checksum_url, dest_path, true).await
+    }
 
-        let result = Self::download_and_hash(download_url, dest_path).await;
+    /// Download + verify without URL validation (`restrict_redirects = false`), for tests that
+    /// talk to a local server.
+    async fn download_release_inner(
+        download_url: &str,
+        checksum_url: &str,
+        dest_path: &Path,
+        restrict_redirects: bool,
+    ) -> Result<()> {
+        let expected_checksum =
+            Self::fetch_checksum(checksum_url, download_url, restrict_redirects).await?;
+
+        let result = Self::download_and_hash(download_url, dest_path, restrict_redirects).await;
         let actual_checksum = match result {
             Ok(sum) => sum,
             Err(e) => {
@@ -40,9 +63,26 @@ impl BinaryDownloader {
         Ok(())
     }
 
-    fn client() -> Result<reqwest::Client> {
+    fn client(restrict_redirects: bool) -> Result<reqwest::Client> {
+        let redirects = if restrict_redirects {
+            // Re-validate every hop, so a redirect cannot lead to an internal address or an
+            // untrusted host.
+            reqwest::redirect::Policy::custom(|attempt| {
+                if attempt.previous().len() >= 5 {
+                    return attempt.error("too many redirects");
+                }
+                match UrlValidator::new().validate_url(attempt.url().as_str()) {
+                    Ok(()) => attempt.follow(),
+                    Err(e) => attempt.error(format!("redirect blocked: {:?}", e)),
+                }
+            })
+        } else {
+            reqwest::redirect::Policy::limited(5)
+        };
+
         reqwest::Client::builder()
             .user_agent(format!("cleanserve-updater/{}", env!("CARGO_PKG_VERSION")))
+            .redirect(redirects)
             .connect_timeout(std::time::Duration::from_secs(15))
             .timeout(std::time::Duration::from_secs(600))
             .build()
@@ -50,10 +90,14 @@ impl BinaryDownloader {
     }
 
     /// Stream the body to disk and return its lowercase hex SHA-256.
-    async fn download_and_hash(download_url: &str, dest_path: &Path) -> Result<String> {
+    async fn download_and_hash(
+        download_url: &str,
+        dest_path: &Path,
+        restrict_redirects: bool,
+    ) -> Result<String> {
         use tokio::io::AsyncWriteExt;
 
-        let mut res = Self::client()?
+        let mut res = Self::client(restrict_redirects)?
             .get(download_url)
             .send()
             .await
@@ -85,7 +129,11 @@ impl BinaryDownloader {
         Ok(format!("{:x}", hasher.finalize()))
     }
 
-    async fn fetch_checksum(checksum_url: &str, download_url: &str) -> Result<String> {
+    async fn fetch_checksum(
+        checksum_url: &str,
+        download_url: &str,
+        restrict_redirects: bool,
+    ) -> Result<String> {
         let filename = download_url
             .split(['?', '#'])
             .next()
@@ -93,7 +141,7 @@ impl BinaryDownloader {
             .filter(|f| !f.is_empty())
             .ok_or_else(|| err("Invalid download URL"))?;
 
-        let res = Self::client()?
+        let res = Self::client(restrict_redirects)?
             .get(checksum_url)
             .send()
             .await
@@ -231,10 +279,11 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let dest = dir.path().join("dl");
-        BinaryDownloader::download_release(
+        BinaryDownloader::download_release_inner(
             &format!("{base}/cleanserve.tar.gz"),
             &format!("{base}/SHA256SUMS"),
             &dest,
+            false,
         )
         .await
         .unwrap();
@@ -252,10 +301,11 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let dest = dir.path().join("dl");
-        let e = BinaryDownloader::download_release(
+        let e = BinaryDownloader::download_release_inner(
             &format!("{base}/cleanserve.tar.gz"),
             &format!("{base}/SHA256SUMS"),
             &dest,
+            false,
         )
         .await
         .unwrap_err();
@@ -270,10 +320,11 @@ mod tests {
 
         let dir = TempDir::new().unwrap();
         let dest = dir.path().join("dl");
-        let e = BinaryDownloader::download_release(
+        let e = BinaryDownloader::download_release_inner(
             &format!("{base}/gone.tar.gz"),
             &format!("{base}/SHA256SUMS"),
             &dest,
+            false,
         )
         .await
         .unwrap_err();
@@ -290,14 +341,28 @@ mod tests {
         .await;
         let dir = TempDir::new().unwrap();
         let dest = dir.path().join("dl");
-        let e = BinaryDownloader::download_release(
+        let e = BinaryDownloader::download_release_inner(
             &format!("{base}/a.tar.gz"),
             &format!("{base}/SHA256SUMS"),
             &dest,
+            false,
         )
         .await
         .unwrap_err();
         assert!(e.message.contains("not found in SHA256SUMS"), "{}", e.message);
+        assert!(!dest.exists());
+    }
+
+    #[tokio::test]
+    async fn public_download_rejects_loopback_and_private_urls() {
+        let dir = TempDir::new().unwrap();
+        let dest = dir.path().join("dl");
+        for url in ["http://127.0.0.1:1/a.tar.gz", "http://10.0.0.1/a.tar.gz", "http://localhost/a"] {
+            let e = BinaryDownloader::download_release(url, "https://github.com/x/SHA256SUMS", &dest)
+                .await
+                .unwrap_err();
+            assert!(e.message.contains("URL validation failed"), "{url}: {}", e.message);
+        }
         assert!(!dest.exists());
     }
 

@@ -1,26 +1,40 @@
 use anyhow::Context;
-use cleanserve_core::php_runtime::shared_runtimes_dir;
-use cleanserve_core::PhpDownloader;
 use cleanserve_core::auto_updater::{archive, BinaryDownloader, UpdateChecker, UpdateInstaller};
+use cleanserve_core::{PhpDownloader, PhpManager};
+use std::path::Path;
 
 pub async fn run_php_update(version: Option<String>) -> anyhow::Result<()> {
-    let version = version.unwrap_or_else(|| "8.4".to_string());
+    let version = version.unwrap_or_else(|| {
+        Path::new("cleanserve.json")
+            .exists()
+            .then(|| {
+                cleanserve_core::CleanServeConfig::load("cleanserve.json")
+                    .ok()
+                    .map(|c| c.engine.php)
+            })
+            .flatten()
+            .unwrap_or_else(|| "8.4".to_string())
+    });
 
-    let php_dir = shared_runtimes_dir().context("Failed to resolve PHP runtimes directory")?;
-    let downloader = PhpDownloader::new(&php_dir)
-        .context("Failed to initialize PHP downloader")?;
-
-    // Check if already installed
-    if downloader.is_installed(&version) {
-        println!("✅ PHP {} is already installed in ~/.cleanserve/runtimes/", version);
+    let manager = PhpManager::new().context("Failed to init PHP manager")?;
+    if let Some(path) = manager.get_path(&version) {
+        println!(
+            "✅ PHP {} is already installed at {}",
+            version,
+            path.display()
+        );
         return Ok(());
     }
 
-    println!("📦 Downloading PHP {} to ~/.cleanserve/runtimes/...", version);
+    println!("📦 Downloading PHP {} to ~/.cleanserve/php/...", version);
+
+    let downloader =
+        PhpDownloader::global().context("Failed to initialize PHP downloader")?;
 
     match downloader.download(&version).await {
-        Ok(_) => {
+        Ok(path) => {
             println!("✅ PHP {} downloaded successfully!", version);
+            println!("   Binary: {}", path.display());
             println!();
             println!("Run 'cleanserve up' to start the server.");
         }
@@ -52,7 +66,7 @@ pub async fn run_cleanserve_update(check_only: bool, force: bool) -> anyhow::Res
     if check_only {
         if info.needs_update {
             println!("✓ Update available: {} → {}", info.current_version, info.latest_version);
-            println!("  Run `cleanserve update` to install it.");
+            println!("  Run `cleanserve update --self` to install it.");
         }
         return Ok(());
     }

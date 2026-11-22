@@ -1,6 +1,6 @@
 use anyhow::Context;
-use cleanserve_core::php_runtime::{missing_modules, shared_runtimes_dir, DEV_BASELINE_MODULES};
-use cleanserve_core::{docker_available, validate_project_php, ComposerTool, PhpDownloader};
+use cleanserve_core::php_runtime::{missing_modules, DEV_BASELINE_MODULES};
+use cleanserve_core::{docker_available, validate_project_php, ComposerTool, PhpManager};
 use std::process::Command;
 
 /// Embedded at compile time: a released binary has no `scripts/` directory next to it.
@@ -12,45 +12,28 @@ pub fn run() -> anyhow::Result<()> {
     println!("✓ cleanserve {}", env!("CARGO_PKG_VERSION"));
 
     let mut usable_php = None;
-    if let Ok(dir) = shared_runtimes_dir() {
-        let mut versions: Vec<String> = std::fs::read_dir(&dir)
-            .map(|rd| {
-                rd.flatten()
-                    .filter_map(|e| e.file_name().into_string().ok())
-                    .filter_map(|n| n.strip_prefix("php-").map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default();
-        versions.sort();
-
-        match versions.last() {
-            None => println!("• PHP: none installed yet (downloaded automatically on `cleanserve up`, or run `cleanserve update --version 8.4`)"),
-            Some(v) => {
-                let exe = PhpDownloader::new(&dir).ok().and_then(|d| d.get_php_exe(v));
-                match exe {
-                    None => println!("✗ PHP {}: binary not found in {}", v, dir.display()),
-                    // Same resolution `cleanserve up` uses, including the full-runtime fallback.
-                    Some(exe) => match validate_project_php(&exe, v) {
-                        Ok(path) => {
-                            println!("✓ PHP {} ({})", v, path.display());
-                            usable_php = Some(path);
-                        }
-                        Err(_) => {
-                            let missing = missing_modules(&exe, DEV_BASELINE_MODULES);
-                            println!(
-                                "✗ PHP {} is a minimal build: missing {}",
-                                v,
-                                missing.join(", ")
-                            );
-                            println!(
-                                "  Place a full runtime in ~/.cleanserve/bin/php-{}/ (or rebuild the runtime with these extensions).",
-                                v.split('.').take(2).collect::<Vec<_>>().join(".")
-                            );
-                        }
-                    },
+    let manager = PhpManager::new().ok();
+    let versions = manager.as_ref().map(|m| m.list_installed()).unwrap_or_default();
+    match (manager.as_ref(), versions.last()) {
+        (Some(manager), Some(v)) => match manager.get_path(v) {
+            None => println!("✗ PHP {}: binary not found", v),
+            // Same resolution `cleanserve up` uses, including the full-runtime fallback.
+            Some(exe) => match validate_project_php(&exe, v) {
+                Ok(path) => {
+                    println!("✓ PHP {} ({})", v, path.display());
+                    usable_php = Some(path);
                 }
-            }
-        }
+                Err(_) => {
+                    let missing = missing_modules(&exe, DEV_BASELINE_MODULES);
+                    println!("✗ PHP {} is a minimal build: missing {}", v, missing.join(", "));
+                    println!(
+                        "  Place a full runtime in ~/.cleanserve/bin/php-{}/ (or rebuild the runtime with these extensions).",
+                        v.split('.').take(2).collect::<Vec<_>>().join(".")
+                    );
+                }
+            },
+        },
+        _ => println!("• PHP: none installed yet (downloaded automatically on `cleanserve up`, or run `cleanserve update --version 8.4`)"),
     }
 
     match usable_php.as_deref().and_then(ComposerTool::detect_backend) {

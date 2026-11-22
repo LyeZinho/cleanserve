@@ -14,6 +14,11 @@ CleanServe identifies and configures itself based on the project structure it de
 - **Entry Point**: `public/index.php`.
 - **Auto-Config**: Creates `var/` directory for logs and cache. Sets a **128MB** upload limit.
 
+### Yii
+- **Detection**: Found when `composer.json` references `yiisoft/` (Yii 3) or `yiisoft/yii2`, or when a `yii` console entry exists next to `composer.json`.
+- **Entry Point**: `public/index.php` (Yii 3) or `web/index.php` (Yii 2).
+- **Auto-Config**: Creates `runtime/` and asset directories.
+
 ### CodeIgniter
 - **Detection**: Found when `index.php` and `system/` directory are present.
 - **Entry Point**: `index.php`.

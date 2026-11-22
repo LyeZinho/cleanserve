@@ -1,15 +1,21 @@
 use anyhow::Context;
 use cleanserve_core::{
-    ComposerTool, Framework, FrameworkInfo, PhpWorker, ProjectLayout, RuntimeTelemetry,
-    SslManager, ensure_project_php, ensure_writable_dirs,
+    ensure_writable_dirs, find_server_ports, prepare_project_php_ini, resolve_dev_php, Framework,
+    FrameworkInfo, PhpDownloader, PhpManager, PhpWorker, ProjectLayout, RuntimeTelemetry,
+    SslManager,
 };
 use cleanserve_proxy::{ProxyServer, HmrEvent, HmrState};
 use cleanserve_watcher::{FileWatcher, FileEvent};
+
+use super::project_env::ensure_document_root;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
+
+/// First port tried for the PHP built-in server (the next free one is used if busy).
+const PHP_BACKEND_PORT: u16 = 9000;
 
 pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Result<()> {
     let project_root = std::env::current_dir().context("Cannot read current directory")?;
@@ -22,15 +28,29 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     let config = cleanserve_core::CleanServeConfig::load(config_path)
         .context("Failed to load config")?;
 
-    let port = port.unwrap_or(config.server.port);
     let _pid_guard = super::pidfile::PidGuard::acquire(&project_root)?;
-    ensure_ports_free(port)?;
+
+    let preferred_port = port.unwrap_or(config.server.port);
     let hot_reload = config.server.hot_reload;
     let php_version = config.engine.php.clone();
     let use_tls = config.server.tls && !http_only;
 
+    // The hot-reload WebSocket always listens on `port + 1`, so both ports must be free.
+    let (server_port, hmr_port) = find_server_ports(preferred_port, true).ok_or_else(|| {
+        anyhow::anyhow!(
+            "No free ports near {} (need 2 consecutive ports). Stop the other process or use `cleanserve up --port <PORT>`.",
+            preferred_port
+        )
+    })?;
+
     let telemetry = Arc::new(RuntimeTelemetry::new());
     telemetry.push_log("Starting CleanServe...");
+    if server_port != preferred_port {
+        telemetry.push_log(format!(
+            "Port {} is in use, using {} instead",
+            preferred_port, server_port
+        ));
+    }
 
     let layout = ProjectLayout::detect(&project_root);
 
@@ -51,26 +71,56 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
             );
         }
     }
-    let framework_info = FrameworkInfo::detect(&project_root);
-    let _ = ensure_writable_dirs(&framework_info);
 
-    let php_path = ensure_project_php(&project_root, &php_version)
-        .await
-        .context("Failed to prepare project PHP")?;
+    // ---- PHP -------------------------------------------------------------------------------
 
-    ComposerTool::ensure_vendor(&php_path, &project_root)
-        .await
-        .context("Composer install failed")?;
+    let manager = PhpManager::new().context("Failed to init PHP manager")?;
+    let managed_php = if let Some(path) = manager.get_path(&php_version) {
+        info!("Using PHP: {}", path.display());
+        path
+    } else {
+        println!("📦 Downloading PHP {}...", php_version);
+        PhpDownloader::global()
+            .context("Failed to initialize PHP downloader")?
+            .ensure(&php_version)
+            .await
+            .context("Failed to download PHP")?
+    };
+    let resolved_version = manager
+        .resolve_installed_version(&php_version)
+        .unwrap_or_else(|| php_version.clone());
 
-    let document_root = project_root.join(root.trim_end_matches('/'));
-    if !document_root.exists() {
-        anyhow::bail!(
-            "Document root {} does not exist. For Yii/Laravel projects run the framework init (e.g. ./init) or fix server.root in cleanserve.json.",
-            document_root.display()
-        );
+    let dev_php = resolve_dev_php(&managed_php, &php_version);
+    let php_path = dev_php.path;
+    if !dev_php.missing_modules.is_empty() {
+        telemetry.push_log(format!(
+            "PHP is missing modules: {} (some frameworks need them)",
+            dev_php.missing_modules.join(", ")
+        ));
     }
-    let _ = cleanserve_core::ensure_dev_router(&project_root, &document_root);
 
+    let framework_info = FrameworkInfo::detect(&project_root);
+    for result in ensure_writable_dirs(&framework_info) {
+        if let Err(e) = result {
+            info!("Could not prepare framework directory: {}", e);
+        }
+    }
+
+    let php_runtime = prepare_project_php_ini(
+        &project_root,
+        &php_path,
+        &resolved_version,
+        &config.engine,
+        &framework_info,
+    )
+    .context("Failed to write project php.ini")?;
+
+    if Path::new("composer.json").exists() && !Path::new("vendor/autoload.php").exists() {
+        telemetry.push_log("vendor/ missing — run `cleanserve composer install`");
+    }
+
+    let document_root = ensure_document_root(&project_root, &root, &config.name, &resolved_version)?;
+    let _ = cleanserve_core::ensure_dev_router(&project_root, &document_root);
     let router = layout
         .router_script
         .clone()
@@ -80,21 +130,25 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
 
     let php_log = project_root.join(".cleanserve").join("php-server.log");
     let _ = std::fs::remove_file(&php_log);
-    let mut php_worker = if let Some(router) = router {
+    let worker = if let Some(router) = router {
         PhpWorker::with_router(php_path.clone(), document_root.clone(), router)
     } else {
         PhpWorker::new(php_path.clone(), document_root.clone())
-    }
-    .with_log_file(php_log.clone());
-    php_worker
-        .start()
+    };
+    let mut php_worker = worker
+        .with_php_ini(php_runtime.ini_path)
+        .with_log_file(php_log.clone());
+    let php_backend_port = php_worker
+        .start_on_port(PHP_BACKEND_PORT)
         .context("Failed to start PHP worker")?;
     telemetry.push_log(format!(
         "PHP {} worker on 127.0.0.1:{} (log: {})",
-        php_version,
-        php_worker.port(),
+        resolved_version,
+        php_backend_port,
         ".cleanserve/php-server.log"
     ));
+
+    // ---- Proxy -----------------------------------------------------------------------------
 
     let tls_material: Option<(String, String)> = if use_tls {
         let ssl = SslManager::new().context("Failed to init SSL")?;
@@ -109,12 +163,12 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     };
 
     let proxy = ProxyServer::new_with_hmr_and_telemetry(
-        port,
+        server_port,
         root.clone(),
         hmr_state.clone(),
         Some(telemetry.clone()),
     )
-    .with_php_port(php_worker.port());
+    .with_php_backend(php_backend_port);
 
     let proxy_tls = tls_material.clone();
     let proxy_handle = tokio::spawn(async move {
@@ -125,7 +179,6 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
         }
     });
 
-    let hmr_port = port + 1;
     let hmr_state2 = hmr_state.clone();
     let hmr_tls = tls_material.clone();
     let hmr_handle = tokio::spawn(async move {
@@ -138,7 +191,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     });
 
     let scheme = if use_tls { "https" } else { "http" };
-    let url = format!("{}://localhost:{}", scheme, port);
+    let url = format!("{}://localhost:{}", scheme, server_port);
     telemetry.push_log(format!("Listening on {}", url));
 
     let _watcher_guard = if hot_reload {
@@ -178,6 +231,9 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     };
 
     let outcome = if no_tui {
+        for line in telemetry.snapshot_logs() {
+            println!("  {}", line);
+        }
         println!("\nCleanServe running at {}\nPress Ctrl+C to stop\n", url);
         tokio::select! {
             _ = shutdown_signal() => Ok(()),
@@ -189,7 +245,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
         let dashboard_state = crate::tui::UpDashboardState {
             project_name: config.name.clone(),
             project_root: project_root.clone(),
-            php_version,
+            php_version: resolved_version,
             document_root: root.clone(),
             url,
             framework: layout.framework.to_string(),
@@ -252,17 +308,4 @@ async fn shutdown_signal() {
         }
     }
     let _ = tokio::signal::ctrl_c().await;
-}
-
-/// Fail early with an actionable message instead of dying silently inside a spawned task.
-fn ensure_ports_free(port: u16) -> anyhow::Result<()> {
-    for (p, what) in [(port, "HTTP"), (port.saturating_add(1), "hot-reload WebSocket")] {
-        if let Err(e) = std::net::TcpListener::bind(("127.0.0.1", p)) {
-            anyhow::bail!(
-                "Port {} ({}) is not available: {}. Stop the other process or use `cleanserve up --port <PORT>`.",
-                p, what, e
-            );
-        }
-    }
-    Ok(())
 }

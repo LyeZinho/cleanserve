@@ -1,31 +1,59 @@
 use anyhow::Context;
-use crate::commands::project_config;
-use cleanserve_core::ensure_project_php;
-use std::process::Command;
+use cleanserve_core::{PhpDownloader, PhpManager};
+use std::path::Path;
+use std::process::{Command, Stdio};
 
-pub async fn run(args: Vec<String>) -> anyhow::Result<()> {
-    if args.is_empty() {
-        anyhow::bail!("Usage: cleanserve php <script> [args...]  (e.g. cleanserve php init)");
+const DEFAULT_PHP: &str = "8.4";
+
+pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Result<()> {
+    let php_version = php_override
+        .or_else(|| {
+            let config_path = Path::new("cleanserve.json");
+            if config_path.exists() {
+                cleanserve_core::CleanServeConfig::load(config_path)
+                    .ok()
+                    .map(|c| c.engine.php)
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| DEFAULT_PHP.to_string());
+
+    let manager = PhpManager::new().context("Failed to init PHP manager")?;
+    let php_path = if let Some(path) = manager.get_path(&php_version) {
+        path
+    } else {
+        println!("📦 PHP {} not found. Downloading...", php_version);
+        PhpDownloader::global()
+            .context("Failed to initialize PHP downloader")?
+            .ensure(&php_version)
+            .await
+            .with_context(|| format!("PHP {} not found. Run 'cleanserve update --version {}' first.", php_version, php_version))?
+    };
+
+    let php_bin_dir = php_path.parent().unwrap_or(Path::new("."));
+    let mut dirs = vec![php_bin_dir.to_path_buf()];
+    if let Some(existing) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&existing));
     }
-
-    let project_root = std::env::current_dir().context("Cannot read current directory")?;
-    let config = project_config::load_or_adopt(&project_root).await?;
-    let php_path = ensure_project_php(&project_root, &config.engine.php)
-        .await
-        .context("Failed to prepare project PHP")?;
+    let path_env = std::env::join_paths(dirs).unwrap_or_else(|_| php_bin_dir.as_os_str().to_os_string());
 
     let mut cmd = Command::new(&php_path);
-    cmd.current_dir(&project_root);
-    if args[0].starts_with('-') {
-        cmd.args(&args);
-    } else {
-        cmd.arg(&args[0]).args(&args[1..]);
+    if let Some(ini) = crate::commands::project_env::project_php_ini(&php_path) {
+        cmd.arg("-c").arg(ini);
     }
-
-    let status = cmd.status().context("Failed to run PHP")?;
+    let status = cmd
+        .args(&args)
+        .env("PATH", path_env)
+        .env("PHP_BINARY", &php_path)
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .status()
+        .context("Failed to execute PHP")?;
 
     if !status.success() {
-        anyhow::bail!("PHP exited with code {:?}", status.code());
+        anyhow::bail!("PHP exited with code: {:?}", status.code());
     }
 
     Ok(())
