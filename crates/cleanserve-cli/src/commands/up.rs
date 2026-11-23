@@ -94,7 +94,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     let php_path = dev_php.path;
     if !dev_php.missing_modules.is_empty() {
         telemetry.push_log(format!(
-            "PHP is missing modules: {} (some frameworks need them)",
+            "This PHP build lacks: {}. Frameworks that need them (Yii, Laravel, ...) will answer HTTP 500. See `cleanserve doctor`.",
             dev_php.missing_modules.join(", ")
         ));
     }

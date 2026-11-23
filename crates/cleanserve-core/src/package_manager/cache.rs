@@ -7,13 +7,10 @@ pub struct PackageCache;
 impl PackageCache {
     /// Get cache root directory
     pub fn root() -> Result<PathBuf> {
-        let cache = dirs::home_dir()
-            .ok_or_else(|| PackageManagerError {
-                message: "Cannot determine home directory".to_string(),
-            })?
-            .join(".cleanserve");
-
-        Ok(cache)
+        // Same root as the PHP runtimes: honours CLEANSERVE_HOME.
+        crate::php_manager::cleanserve_home().map_err(|e| PackageManagerError {
+            message: format!("Cannot determine the CleanServe home directory: {}", e),
+        })
     }
 
     /// Get package version cache path
