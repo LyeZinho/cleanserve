@@ -13,3 +13,4 @@ pub mod project_config;
 pub mod stack;
 pub mod setup;
 pub mod uninstall;
+pub mod version;

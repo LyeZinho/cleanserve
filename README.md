@@ -106,7 +106,7 @@ Legacy alias: `cleanserve package add mysql` → same as `stack add`.
 Navigate to your PHP project folder and run:
 
 ```bash
-cleanserve init
+cleanserve up   # creates cleanserve.json automatically if missing
 ```
 
 This will create a `cleanserve.json` file based on your `composer.json`.
