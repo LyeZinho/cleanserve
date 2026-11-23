@@ -22,7 +22,12 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
 
     let config_path = Path::new("cleanserve.json");
     if !config_path.exists() {
-        anyhow::bail!("No cleanserve.json found. Run 'cleanserve init' first.");
+        if Path::new("composer.json").exists() || Path::new("public/index.php").exists() {
+            println!("No cleanserve.json found — initializing automatically.");
+            super::init::run(None, None, false).await?;
+        } else {
+            anyhow::bail!("No PHP project found here (no composer.json or public/index.php).");
+        }
     }
 
     let config = cleanserve_core::CleanServeConfig::load(config_path)
@@ -195,7 +200,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     telemetry.push_log(format!("Listening on {}", url));
 
     let _watcher_guard = if hot_reload {
-        let watcher = FileWatcher::new(&root);
+        let watcher = FileWatcher::new(&project_root);
         let hmr = hmr_state.clone();
         match watcher.watch() {
             Ok((mut rx, guard)) => {

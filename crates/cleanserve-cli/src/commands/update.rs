@@ -1,5 +1,5 @@
 use anyhow::Context;
-use cleanserve_core::auto_updater::{archive, BinaryDownloader, UpdateChecker, UpdateInstaller};
+use cleanserve_core::auto_updater::{archive, BinaryDownloader, UpdateChecker, UpdateInfo, UpdateInstaller};
 use cleanserve_core::{PhpDownloader, PhpManager};
 use std::path::Path;
 
@@ -66,11 +66,17 @@ pub async fn run_cleanserve_update(check_only: bool, force: bool) -> anyhow::Res
     if check_only {
         if info.needs_update {
             println!("✓ Update available: {} → {}", info.current_version, info.latest_version);
-            println!("  Run `cleanserve update --self` to install it.");
+            println!("  Run `cleanserve update` to install it.");
         }
         return Ok(());
     }
 
+    install_info(&info).await
+}
+
+/// Download, verify and install the release described by `info` (upgrade or downgrade),
+/// rolling back if the new binary fails its sanity check.
+pub async fn install_info(info: &UpdateInfo) -> anyhow::Result<()> {
     let platform_asset = UpdateChecker::asset_name().map_err(|e| anyhow::anyhow!(e))?;
     let download_url = info.download_url.clone().ok_or_else(|| {
         anyhow::anyhow!(
@@ -122,12 +128,26 @@ pub async fn run_cleanserve_update(check_only: bool, force: bool) -> anyhow::Res
     }
 
     let _ = UpdateInstaller::cleanup_old_backups(None);
+    ensure_short_alias(&current_exe);
     println!(
-        "✅ Updated CleanServe {} → {} ({})",
+        "✅ CleanServe {} → {} ({})",
         info.current_version,
         info.latest_version,
         current_exe.display()
     );
 
     Ok(())
+}
+
+/// Make `cs` available next to `cleanserve` (symlink on Unix).
+pub fn ensure_short_alias(target: &Path) {
+    #[cfg(unix)]
+    if let Some(dir) = target.parent() {
+        let alias = dir.join("cs");
+        if std::fs::symlink_metadata(&alias).is_err() {
+            let _ = std::os::unix::fs::symlink(target.file_name().unwrap_or_default(), alias);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = target;
 }

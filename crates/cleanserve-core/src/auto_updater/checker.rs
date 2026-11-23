@@ -3,6 +3,7 @@ use crate::UrlValidator;
 use semver::Version;
 use serde::Deserialize;
 
+const RELEASES_URL: &str = "https://api.github.com/repos/LyeZinho/cleanserve/releases";
 const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/LyeZinho/cleanserve/releases/latest";
 
 pub struct UpdateChecker;
@@ -11,6 +12,12 @@ pub struct UpdateChecker;
 pub struct GitHubRelease {
     pub tag_name: String,
     #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub published_at: Option<String>,
+    #[serde(default)]
+    pub prerelease: bool,
+    #[serde(default)]
     pub assets: Vec<GitHubAsset>,
 }
 
@@ -18,6 +25,14 @@ pub struct GitHubRelease {
 pub struct GitHubAsset {
     pub name: String,
     pub browser_download_url: String,
+    #[serde(default)]
+    pub size: u64,
+}
+
+impl GitHubRelease {
+    pub fn semver(&self) -> Option<Version> {
+        Version::parse(self.tag_name.trim_start_matches('v')).ok()
+    }
 }
 
 fn err(message: impl Into<String>) -> UpdateCheckerError {
@@ -72,8 +87,27 @@ impl UpdateChecker {
     }
 
     async fn fetch_latest_release() -> Result<GitHubRelease> {
+        Self::fetch_json(LATEST_RELEASE_URL).await
+    }
+
+    /// Fetch one release by version (`0.3.1` or `v0.3.1`).
+    pub async fn fetch_release(version: &str) -> Result<GitHubRelease> {
+        let v = version.trim().trim_start_matches('v');
+        Version::parse(v).map_err(|_| err(format!("'{}' is not a valid version (e.g. 0.3.1)", version)))?;
+        Self::fetch_json(&format!("{}/tags/v{}", RELEASES_URL, v)).await
+    }
+
+    /// All published releases, newest first.
+    pub async fn list_releases() -> Result<Vec<GitHubRelease>> {
+        let mut all: Vec<GitHubRelease> =
+            Self::fetch_json(&format!("{}?per_page=30", RELEASES_URL)).await?;
+        all.sort_by(|a, b| b.semver().cmp(&a.semver()));
+        Ok(all)
+    }
+
+    async fn fetch_json<T: serde::de::DeserializeOwned>(url: &str) -> Result<T> {
         UrlValidator::new()
-            .validate_url(LATEST_RELEASE_URL)
+            .validate_url(url)
             .map_err(|e| err(format!("URL validation failed: {:?}", e)))?;
 
         let client = reqwest::Client::builder()
@@ -84,7 +118,7 @@ impl UpdateChecker {
             .map_err(|e| err(format!("Failed to build HTTP client: {}", e)))?;
 
         let mut request = client
-            .get(LATEST_RELEASE_URL)
+            .get(url)
             .header("Accept", "application/vnd.github+json");
         // Optional: lifts the anonymous API rate limit (60 requests/hour per IP).
         if let Ok(token) = std::env::var("GITHUB_TOKEN") {
@@ -100,7 +134,7 @@ impl UpdateChecker {
 
         let status = response.status();
         if status == reqwest::StatusCode::NOT_FOUND {
-            return Err(err("No releases have been published yet"));
+            return Err(err("Release not found. Run 'cleanserve version' to see available versions"));
         }
         if status == reqwest::StatusCode::FORBIDDEN
             || status == reqwest::StatusCode::TOO_MANY_REQUESTS
@@ -116,7 +150,7 @@ impl UpdateChecker {
         }
 
         response
-            .json::<GitHubRelease>()
+            .json::<T>()
             .await
             .map_err(|e| err(format!("Failed to parse GitHub API response: {}", e)))
     }

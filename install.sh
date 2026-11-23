@@ -314,6 +314,7 @@ done < "${DIRS_FILE}"
 cp "${NEW_BIN}" "${INSTALL_DIR}/.${BIN_FILE}.new"
 chmod +x "${INSTALL_DIR}/.${BIN_FILE}.new"
 mv -f "${INSTALL_DIR}/.${BIN_FILE}.new" "${TARGET}"
+case "${BIN_FILE}" in *.exe) ;; *) ln -sf "${BIN_FILE}" "${INSTALL_DIR}/cs" 2>/dev/null || true ;; esac  # short alias
 
 INSTALLED="$(reported_version "${TARGET}")"
 [ -n "${INSTALLED}" ] || error "The installed binary does not run (${TARGET})."
