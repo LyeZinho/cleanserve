@@ -432,6 +432,7 @@ dependencies = [
  "mime_guess",
  "rustls",
  "rustls-pemfile",
+ "serde_json",
  "tokio",
  "tokio-rustls",
  "tokio-test",

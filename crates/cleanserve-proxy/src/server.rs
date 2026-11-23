@@ -62,41 +62,47 @@ impl Default for HmrState {
 
 const HMR_CLIENT_SCRIPT: &str = r#"
 (function() {
-    const wsPort = parseInt(location.port || (location.protocol === 'https:' ? '443' : '80')) + 1;
-    const wsProto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(wsProto + '//' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
-    ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'reload') {
-            console.log('[CleanServe] Page reload requested');
-            location.reload();
-        } else if (data.type === 'style' && data.path) {
-            console.log('[CleanServe] CSS updated:', data.path);
-            const links = document.querySelectorAll('link[rel="stylesheet"]');
-            links.forEach(link => {
-                const href = link.href.split('?')[0];
-                if (href.includes(data.path)) {
-                    link.href = href + '?t=' + Date.now();
-                }
-            });
-        }
-    };
-    ws.onclose = () => {
-        console.log('[CleanServe] HMR disconnected, reconnecting...');
-        setTimeout(function () {
-            try {
-                var ws2 = new WebSocket(wsProto + '//' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
-                ws2.onmessage = ws.onmessage;
-                ws2.onopen = ws.onopen;
-                ws2.onclose = ws.onclose;
-            } catch (e) {
-                console.log('[CleanServe] HMR reconnect failed', e);
+    if (window.__cleanserveHmr) { return; }
+    window.__cleanserveHmr = true;
+    // Same origin as the page: one port, one certificate, no mixed content.
+    var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/__cleanserve_hmr';
+    var retry = 0;
+    function swapStyle(path) {
+        var rel = String(path).replace(/\\/g, '/');
+        var swapped = false;
+        document.querySelectorAll('link[rel="stylesheet"]').forEach(function (link) {
+            var u = new URL(link.href, location.href);
+            if (u.origin === location.origin && (rel === u.pathname || rel.endsWith(u.pathname))) {
+                u.searchParams.set('t', Date.now());
+                link.href = u.toString();
+                swapped = true;
             }
-        }, 1500);
-    };
-    ws.onopen = () => {
-        console.log('[CleanServe] HMR connected on port ' + wsPort);
-    };
+        });
+        return swapped;
+    }
+    function connect() {
+        var ws = new WebSocket(url);
+        ws.onopen = function () {
+            console.log('[CleanServe] HMR connected');
+            if (retry > 0) { location.reload(); } // server restarted: pick up its new state
+            retry = 0;
+        };
+        ws.onmessage = function (event) {
+            var data = JSON.parse(event.data);
+            if (data.type === 'reload') {
+                console.log('[CleanServe] Page reload requested');
+                location.reload();
+            } else if (data.type === 'style' && data.path) {
+                console.log('[CleanServe] CSS updated:', data.path);
+                if (!swapStyle(data.path)) { location.reload(); }
+            }
+        };
+        ws.onclose = function () {
+            retry++;
+            setTimeout(connect, Math.min(1000 * retry, 5000));
+        };
+    }
+    connect();
 })();
 "#;
 
@@ -290,6 +296,7 @@ impl ProxyServer {
                                 .timer(TokioTimer::new())
                                 .header_read_timeout(HEADER_READ_TIMEOUT)
                                 .serve_connection(io, service)
+                                .with_upgrades()
                                 .await
                             {
                                 if stderr_logging {
@@ -316,6 +323,7 @@ impl ProxyServer {
                                 .timer(TokioTimer::new())
                                 .header_read_timeout(HEADER_READ_TIMEOUT)
                                 .serve_connection(io, service)
+                                .with_upgrades()
                                 .await
                             {
                                 if stderr_logging {
@@ -405,7 +413,21 @@ impl ProxyServer {
         S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
     {
         match accept_async(stream).await {
-            Ok(ws_stream) => {
+            Ok(ws_stream) => Self::run_hmr_loop(ws_stream, hmr_state).await,
+            Err(e) => {
+                warn!("WebSocket handshake failed: {}", e);
+            }
+        }
+    }
+
+    async fn run_hmr_loop<S>(
+        ws_stream: tokio_tungstenite::WebSocketStream<S>,
+        hmr_state: Arc<RwLock<HmrState>>,
+    ) where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        {
+            {
                 let (mut write, _read) = ws_stream.split();
                 let rx = {
                     let state = hmr_state.read().await;
@@ -424,7 +446,7 @@ impl ProxyServer {
                         },
                         HmrEvent::StyleReload(path) => {
                             info!("📤 Sending style reload to WebSocket client: {}", path);
-                            format!(r#"{{"type":"style","path":"{}"}}"#, path)
+                            serde_json::json!({"type": "style", "path": path}).to_string()
                         },
                     };
                     if write.send(Message::Text(msg.into())).await.is_err() {
@@ -433,15 +455,53 @@ impl ProxyServer {
                     }
                 }
             }
-            Err(e) => {
-                warn!("WebSocket handshake failed: {}", e);
-            }
         }
     }
 }
 
 /// Handle one request and record it (method, path, status, duration) for the dashboard.
 #[allow(clippy::too_many_arguments)]
+/// Upgrade `/__cleanserve_hmr` to a WebSocket on the main port (works with the
+/// self-signed certificate the page already trusts, and needs no second port).
+fn handle_hmr_upgrade(
+    mut req: Request<hyper::body::Incoming>,
+    hmr_state: Arc<RwLock<HmrState>>,
+) -> Response<Full<Bytes>> {
+    use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    let Some(key) = req.headers().get("sec-websocket-key").map(|k| k.as_bytes().to_vec()) else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Full::new(Bytes::from("WebSocket upgrade required")))
+            .expect("valid 400 response");
+    };
+    let accept = derive_accept_key(&key);
+
+    tokio::spawn(async move {
+        match hyper::upgrade::on(&mut req).await {
+            Ok(upgraded) => {
+                let ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+                    TokioIo::new(upgraded),
+                    Role::Server,
+                    None,
+                )
+                .await;
+                ProxyServer::run_hmr_loop(ws, hmr_state).await;
+            }
+            Err(e) => warn!("HMR upgrade failed: {}", e),
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Accept", accept)
+        .body(Full::new(Bytes::new()))
+        .expect("valid 101 response")
+}
+
 async fn handle_request(
     req: Request<hyper::body::Incoming>,
     root: Arc<String>,
@@ -482,7 +542,7 @@ async fn handle_request(
 async fn handle_request_inner(
     req: Request<hyper::body::Incoming>,
     root: Arc<String>,
-    _hmr_state: Arc<RwLock<HmrState>>,
+    hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
     request_validator: Arc<RequestValidator>,
     slowloris_protection: Arc<SlowlorisProtection>,
@@ -491,6 +551,9 @@ async fn handle_request_inner(
     telemetry: Option<Arc<RuntimeTelemetry>>,
     upstream: Upstream,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    if req.uri().path() == "/__cleanserve_hmr" {
+        return Ok(handle_hmr_upgrade(req, hmr_state));
+    }
     if let Some(t) = &telemetry {
         t.record_request();
     }
