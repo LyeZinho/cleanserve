@@ -261,8 +261,12 @@ chmod +x "${NEW_BIN}"
 # Prove the new binary works here BEFORE touching anything that is already installed.
 NEW_VERSION="$(reported_version "${NEW_BIN}")"
 [ -n "${NEW_VERSION}" ] || error "The downloaded binary does not run on this system; nothing was changed."
+STALE_RELEASE=0
 if ! version_ge "${NEW_VERSION}" "${MIN_COMPATIBLE}"; then
-  warn "This release reports ${NEW_VERSION}, below the minimum ${MIN_COMPATIBLE}: it predates this installer."
+  # Deleting an old copy to install another one that is just as old would only be noise.
+  STALE_RELEASE=1
+  warn "The ${VERSION} release only contains CleanServe ${NEW_VERSION}; ${MIN_COMPATIBLE} or newer has not been published yet."
+  warn "It will be installed as-is. For the current code: git clone ${REPO_URL} && sh cleanserve/scripts/install-local.sh"
 fi
 
 # ---- remove incompatible installs -------------------------------------------------------------
@@ -282,7 +286,7 @@ while IFS= read -r d; do
     # Replaced below either way; just say what happens to it.
     if [ -z "${old}" ]; then
       warn "${f} does not look like a working CleanServe; it will be replaced."
-    elif version_ge "${old}" "${MIN_COMPATIBLE}"; then
+    elif [ "${STALE_RELEASE}" = "1" ] || version_ge "${old}" "${MIN_COMPATIBLE}"; then
       REPLACED_FROM="${old}"
     else
       info "Found CleanServe ${old} at ${f}: older than ${MIN_COMPATIBLE}, removing and reinstalling."
@@ -295,8 +299,8 @@ while IFS= read -r d; do
   # Other copies: never touch something that is not CleanServe.
   if [ -z "${old}" ]; then
     warn "${f} exists but is not a recognisable CleanServe; leaving it alone."
-  elif version_ge "${old}" "${MIN_COMPATIBLE}"; then
-    :  # compatible copy, keep it (a PATH check at the end warns if it shadows the new one)
+  elif [ "${STALE_RELEASE}" = "1" ] || version_ge "${old}" "${MIN_COMPATIBLE}"; then
+    :  # compatible copy (or nothing better to offer), keep it; the PATH check at the end warns about shadowing
   elif rm -f "${f}" 2>/dev/null; then
     info "Removed outdated CleanServe ${old} at ${f}."
   else
