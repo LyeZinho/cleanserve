@@ -202,6 +202,7 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
     let _watcher_guard = if hot_reload {
         let watcher = FileWatcher::new(&project_root);
         let hmr = hmr_state.clone();
+        let watch_root = project_root.clone();
         match watcher.watch() {
             Ok((mut rx, guard)) => {
                 info!("File watcher started");
@@ -218,7 +219,16 @@ pub async fn run(port: Option<u16>, no_tui: bool, http_only: bool) -> anyhow::Re
                                 info!("Style files changed: {:?}", paths);
                                 let state = hmr.read().await;
                                 for path in paths {
-                                    state.emit(HmrEvent::StyleReload(path.to_string_lossy().to_string()));
+                                    // Browsers cannot hot-swap scripts: reload the page instead.
+                                    if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("js")) {
+                                        state.emit(HmrEvent::PhpReload);
+                                        continue;
+                                    }
+                                    // Send a project-relative, forward-slash path the page can match.
+                                    let rel = path.strip_prefix(&watch_root).unwrap_or(&path);
+                                    state.emit(HmrEvent::StyleReload(
+                                        rel.to_string_lossy().replace('\\', "/"),
+                                    ));
                                 }
                             }
                         }

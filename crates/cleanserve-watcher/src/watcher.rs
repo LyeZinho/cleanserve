@@ -89,3 +89,19 @@ impl FileWatcher {
         Ok((rx, debouncer))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_ignored;
+    use std::path::Path;
+
+    #[test]
+    fn ignores_vendor_and_storage_but_not_src() {
+        let root = Path::new("/p");
+        assert!(is_ignored(Path::new("/p/vendor/x/a.php"), root));
+        assert!(is_ignored(Path::new("/p/storage/logs/a.php"), root));
+        assert!(is_ignored(Path::new("/p/.git/x.php"), root));
+        assert!(!is_ignored(Path::new("/p/src/Controller/a.php"), root));
+        assert!(!is_ignored(Path::new("/p/public/style.css"), root));
+    }
+}
