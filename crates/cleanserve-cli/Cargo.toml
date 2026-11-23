@@ -23,3 +23,13 @@ tracing-subscriber.workspace = true
 dirs = "5"
 reqwest.workspace = true
 serde_json.workspace = true
+ratatui = "0.29"
+semver = "1.0"
+serde = { workspace = true }
+sha2 = "0.10"
+tempfile = "3"
+flate2 = "1"
+tar = "0.4"
+
+[target.'cfg(windows)'.dependencies]
+zip = { version = "2", default-features = false, features = ["deflate"] }

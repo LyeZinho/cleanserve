@@ -17,15 +17,8 @@ pub async fn run(args: Vec<String>, php_override: Option<String>) -> anyhow::Res
         None
     };
 
-    if config.is_none() && !is_create_project(&args) && Path::new("composer.json").exists() {
-        println!("No cleanserve.json found. Run 'cleanserve init' to pin a PHP version.");
-        println!("Using PHP {} for this command.\n", DEFAULT_PHP);
-    } else if config.is_none() && !is_create_project(&args) && !Path::new("composer.json").exists() {
-        anyhow::bail!(
-            "No cleanserve.json found. Run 'cleanserve init' first, or use:\n  cleanserve composer create-project vendor/package dir"
-        );
-    }
-
+    // No cleanserve.json is fine: Composer runs with the default PHP, and
+    // create-project initializes the new project automatically afterwards.
     let php_version = php_override
         .or_else(|| config.as_ref().map(|c| c.engine.php.clone()))
         .unwrap_or_else(|| DEFAULT_PHP.to_string());

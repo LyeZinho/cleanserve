@@ -13,6 +13,20 @@ pub enum FileEvent {
 /// Guard that keeps the file watcher alive. Drop this to stop watching.
 pub type WatcherGuard = Debouncer<RecommendedWatcher>;
 
+const IGNORED_DIRS: &[&str] = &[
+    "vendor", "node_modules", ".git", ".cleanserve", "storage", "var", "runtime", "cache", "tmp",
+    "logs",
+];
+
+fn is_ignored(path: &std::path::Path, root: &std::path::Path) -> bool {
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    rel.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .is_some_and(|name| IGNORED_DIRS.contains(&name))
+    })
+}
+
 pub struct FileWatcher {
     root: PathBuf,
 }
@@ -29,6 +43,7 @@ impl FileWatcher {
     pub fn watch(&self) -> anyhow::Result<(mpsc::Receiver<FileEvent>, WatcherGuard)> {
         let (tx, rx) = mpsc::channel(100);
         let root = self.root.clone();
+        let filter_root = root.clone();
 
         let mut debouncer = new_debouncer(
             Duration::from_millis(300),
@@ -40,9 +55,17 @@ impl FileWatcher {
                     for event in events {
                         if event.kind == DebouncedEventKind::Any {
                             let path = event.path.clone();
+                            if is_ignored(&path, &filter_root) {
+                                continue;
+                            }
                             if let Some(ext) = path.extension() {
                                 let ext_str = ext.to_string_lossy().to_lowercase();
-                                if ext_str == "php" {
+                                if matches!(
+                                    ext_str.as_str(),
+                                    "php" | "phtml" | "twig" | "html" | "htm" | "env" | "json"
+                                        | "yaml" | "yml" | "xml" | "ini" | "neon" | "latte"
+                                ) || path.to_string_lossy().ends_with(".blade.php")
+                                {
                                     php_events.push(path);
                                 } else if ext_str == "css" || ext_str == "js" {
                                     style_events.push(path);

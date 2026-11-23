@@ -10,3 +10,6 @@ pub mod setupdomain;
 pub mod stack;
 pub mod project_env;
 pub mod package;
+pub mod selfupdate;
+pub mod tui;
+pub mod version;

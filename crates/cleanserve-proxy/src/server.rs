@@ -56,8 +56,8 @@ impl Default for HmrState {
 
 const HMR_CLIENT_SCRIPT: &str = r#"
 (function() {
-    const wsPort = parseInt(location.port || '80') + 1;
-    const ws = new WebSocket('ws://' + location.hostname + ':' + wsPort + '/__cleanserve_hmr');
+    const scheme = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    const ws = new WebSocket(scheme + location.host + '/__cleanserve_hmr');
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
         if (data.type === 'reload') {
@@ -76,10 +76,10 @@ const HMR_CLIENT_SCRIPT: &str = r#"
     };
     ws.onclose = () => {
         console.log('[CleanServe] HMR disconnected, reconnecting...');
-        setTimeout(() => location.reload(), 3000);
+        setTimeout(() => location.reload(), 2000);
     };
     ws.onopen = () => {
-        console.log('[CleanServe] HMR connected on port ' + wsPort);
+        console.log('[CleanServe] HMR connected');
     };
 })();
 "#;
@@ -314,7 +314,7 @@ impl ProxyServer {
                 request_php_port,
             )
         });
-        if let Err(e) = http1::Builder::new().serve_connection(io, service).await {
+        if let Err(e) = http1::Builder::new().serve_connection(io, service).with_upgrades().await {
             error!("Error serving connection: {}", e);
         }
     }
@@ -360,7 +360,21 @@ impl ProxyServer {
         hmr_state: Arc<RwLock<HmrState>>,
     ) {
         match accept_async(stream).await {
-            Ok(ws_stream) => {
+            Ok(ws_stream) => Self::run_hmr_loop(ws_stream, hmr_state).await,
+            Err(e) => {
+                warn!("WebSocket handshake failed: {}", e);
+            }
+        }
+    }
+
+    async fn run_hmr_loop<S>(
+        ws_stream: tokio_tungstenite::WebSocketStream<S>,
+        hmr_state: Arc<RwLock<HmrState>>,
+    ) where
+        S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+    {
+        {
+            {
                 let (mut write, _read) = ws_stream.split();
                 let rx = {
                     let state = hmr_state.read().await;
@@ -388,17 +402,14 @@ impl ProxyServer {
                     }
                 }
             }
-            Err(e) => {
-                warn!("WebSocket handshake failed: {}", e);
-            }
         }
     }
 }
 
 async fn handle_request(
-    req: Request<hyper::body::Incoming>,
+    mut req: Request<hyper::body::Incoming>,
     root: Arc<String>,
-    _hmr_state: Arc<RwLock<HmrState>>,
+    hmr_state: Arc<RwLock<HmrState>>,
     rate_limiter: Arc<RateLimiter>,
     request_validator: Arc<RequestValidator>,
     slowloris_protection: Arc<SlowlorisProtection>,
@@ -407,6 +418,10 @@ async fn handle_request(
     security_headers: SecurityHeaders,
     php_backend_port: u16,
 ) -> Result<Response<Full<Bytes>>, std::convert::Infallible> {
+    if req.uri().path() == "/__cleanserve_hmr" {
+        return Ok(handle_hmr_upgrade(req, hmr_state));
+    }
+
     let ip = remote_addr.ip();
     let is_localhost = ip.is_loopback();
 
@@ -621,6 +636,47 @@ async fn handle_request(
     .unwrap();
     
     Ok(not_found_resp)
+}
+
+/// Upgrade `/__cleanserve_hmr` to a WebSocket on the main (TLS) port, so the
+/// browser needs no extra port, mixed content or second certificate exception.
+fn handle_hmr_upgrade(
+    mut req: Request<hyper::body::Incoming>,
+    hmr_state: Arc<RwLock<HmrState>>,
+) -> Response<Full<Bytes>> {
+    use tokio_tungstenite::tungstenite::handshake::derive_accept_key;
+    use tokio_tungstenite::tungstenite::protocol::Role;
+
+    let Some(key) = req.headers().get("sec-websocket-key").map(|k| k.as_bytes().to_vec()) else {
+        return Response::builder()
+            .status(StatusCode::BAD_REQUEST)
+            .body(Full::new(Bytes::from("WebSocket upgrade required")))
+            .expect("valid 400 response");
+    };
+    let accept = derive_accept_key(&key);
+
+    tokio::spawn(async move {
+        match hyper::upgrade::on(&mut req).await {
+            Ok(upgraded) => {
+                let ws = tokio_tungstenite::WebSocketStream::from_raw_socket(
+                    TokioIo::new(upgraded),
+                    Role::Server,
+                    None,
+                )
+                .await;
+                ProxyServer::run_hmr_loop(ws, hmr_state).await;
+            }
+            Err(e) => warn!("HMR upgrade failed: {}", e),
+        }
+    });
+
+    Response::builder()
+        .status(StatusCode::SWITCHING_PROTOCOLS)
+        .header("Connection", "Upgrade")
+        .header("Upgrade", "websocket")
+        .header("Sec-WebSocket-Accept", accept)
+        .body(Full::new(Bytes::new()))
+        .expect("valid 101 response")
 }
 
 fn inject_hmr_script(html: &str) -> String {

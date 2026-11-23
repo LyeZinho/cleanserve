@@ -17,7 +17,12 @@ const PHP_BACKEND_PORT: u16 = 9000;
 pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
     let config_path = Path::new("cleanserve.json");
     if !config_path.exists() {
-        anyhow::bail!("No cleanserve.json found. Run 'cleanserve init' first.");
+        if Path::new("composer.json").exists() || Path::new("public/index.php").exists() {
+            println!("No cleanserve.json found — initializing automatically.");
+            super::init::run(None, None, false).await?;
+        } else {
+            anyhow::bail!("No PHP project found here (no composer.json or public/index.php).");
+        }
     }
 
     let config = cleanserve_core::CleanServeConfig::load(config_path)
@@ -52,7 +57,7 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         );
     }
 
-    println!("\n🌀 CleanServe v0.3.0 starting...\n");
+    println!("\n🌀 CleanServe v{} starting...\n", env!("CARGO_PKG_VERSION"));
 
     let manager = PhpManager::new().context("Failed to init PHP manager")?;
     let php_path = if let Some(path) = manager.get_path(php_version) {
@@ -201,13 +206,15 @@ pub async fn run(port: Option<u16>) -> anyhow::Result<()> {
         println!("   https://{}{}", app.domain, display_port);
     }
     if hot_reload {
-        println!("   Hot Reload: enabled (ws://localhost:{})", hmr_port);
+        println!("   Hot Reload: enabled (WebSocket on the same HTTPS port)");
     }
     println!("\nPress Ctrl+C to stop\n");
 
     let mut watcher_guards = Vec::new();
     if hot_reload {
-        for root in &app_roots {
+        // Watch the whole project (src/, views, config...), not only the document root.
+        let _ = &app_roots;
+        for root in std::iter::once(&project_root) {
             let watcher = FileWatcher::new(root);
             let hmr = hmr_state.clone();
             match watcher.watch() {

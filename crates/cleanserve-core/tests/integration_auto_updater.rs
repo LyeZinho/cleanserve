@@ -4,13 +4,15 @@ use cleanserve_core::auto_updater::{UpdateChecker, BinaryDownloader};
 async fn test_update_checker_version_comparison() {
     let info = UpdateChecker::check_for_updates("0.3.0").await.unwrap();
     assert_eq!(info.current_version, "0.3.0");
-    assert_eq!(info.latest_version, "0.3.1");
+    // Live GitHub data: only assert relative to the real latest release.
+    assert!(!info.latest_version.is_empty());
     assert!(info.needs_update);
 }
 
 #[tokio::test]
 async fn test_update_checker_no_update_needed() {
-    let info = UpdateChecker::check_for_updates("0.3.1").await.unwrap();
+    let latest = UpdateChecker::check_for_updates("0.0.1").await.unwrap().latest_version;
+    let info = UpdateChecker::check_for_updates(&latest).await.unwrap();
     assert!(!info.needs_update);
 }
 

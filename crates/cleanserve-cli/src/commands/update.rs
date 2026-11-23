@@ -54,35 +54,3 @@ pub async fn run_php_update(version: Option<String>) -> anyhow::Result<()> {
 
     Ok(())
 }
-
-pub async fn run_cleanserve_update(check_only: bool, force: bool) -> anyhow::Result<()> {
-    let current_version = env!("CARGO_PKG_VERSION");
-
-    println!("Checking for CleanServe updates...");
-
-    let info = cleanserve_core::auto_updater::UpdateChecker::check_for_updates(current_version)
-        .await
-        .map_err(|e| anyhow::anyhow!(e))?;
-
-    println!("Current version: {}", info.current_version);
-    println!("Latest version: {}", info.latest_version);
-
-    if !info.needs_update && !force {
-        println!("✓ Already up to date!");
-        return Ok(());
-    }
-
-    if check_only {
-        if info.needs_update {
-            println!(
-                "✓ Update available: {} → {}",
-                info.current_version, info.latest_version
-            );
-        }
-        return Ok(());
-    }
-
-    println!("✓ Update would install: {}", info.latest_version);
-
-    Ok(())
-}

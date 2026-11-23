@@ -87,15 +87,33 @@ Installed versions are stored in `~/.cleanserve/php/` (project-local `.cleanserv
 
 ## update
 
-Downloads and installs a PHP version into the shared cache.
+Updates CleanServe itself to the latest GitHub release (download, SHA-256 verification, atomic replace, automatic rollback if the new binary fails its check). Shows a live progress TUI in a terminal.
 
 ```bash
-cleanserve update [--version VERSION]
+cleanserve update [--check] [--force] [--no-tui]
+cleanserve update --php [VERSION]   # install/refresh a PHP runtime instead
 ```
 
-**Arguments:**
-- `--version`: The PHP version to download (e.g., `8.4` or `8.4.19`). If omitted, uses `engine.php` from `cleanserve.json`, or 8.4.
-- `--check`: Check for CleanServe application updates instead of installing PHP.
+- `--check`: only report whether an update is available.
+- `--force`: reinstall even if already up to date.
+- `--no-tui`: plain text output (also automatic when not in a terminal).
+- `--php [VERSION]`: install a PHP runtime (defaults to `engine.php` or 8.4). This replaces the old `cleanserve update --version`.
+
+## version
+
+Version manager for CleanServe.
+
+```bash
+cleanserve version            # interactive picker (releases, notes, upgrade/downgrade)
+cleanserve version 0.3.1      # install a specific version (upgrade or downgrade)
+cleanserve version latest
+```
+
+Keys in the picker: `↑/↓` or `j/k` navigate, `Enter` install, `q` quit. The previous binary is backed up to `~/.cleanserve/backups/` (last 3 kept).
+
+## Short alias: `cs`
+
+`cs` is a short alias for `cleanserve` (e.g. `cs up`, `cs update`, `cs version`). The installer and `cleanserve update` create the `cs` symlink next to the binary.
 
 ## composer
 

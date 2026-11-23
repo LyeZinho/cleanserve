@@ -8,7 +8,8 @@ const VERSION: &str = concat!(
 );
 
 #[derive(Parser)]
-#[command(name = "cleanserve")]
+#[command(name = "cleanserve", bin_name = "cleanserve")]
+#[command(after_help = "Tip: `cs` is a short alias for `cleanserve` (e.g. `cs up`, `cs update`).")]
 #[command(version = VERSION)]
 #[command(about = "Zero-Burden PHP Runtime & Development Server")]
 pub struct Cli {
@@ -52,17 +53,31 @@ pub enum Commands {
         #[arg(long)]
         installed: bool,
     },
-    /// Download and install a PHP version
+    /// Update CleanServe itself to the latest release
     Update {
-        /// PHP version to download (e.g., 8.4, 8.3). Defaults to the project version.
-        #[arg(short, long)]
-        version: Option<String>,
-        /// Check for CleanServe updates instead of PHP
+        /// Only check whether an update is available
         #[arg(long)]
         check: bool,
-        /// Force update even if versions match
+        /// Reinstall even if already up to date
         #[arg(long)]
         force: bool,
+        /// Plain output (no TUI)
+        #[arg(long)]
+        no_tui: bool,
+        /// Install/refresh a PHP runtime instead (e.g. --php 8.4); defaults to the project version
+        #[arg(long, num_args = 0..=1, default_missing_value = "")]
+        php: Option<String>,
+    },
+    /// Manage the CleanServe version: `version` opens a picker, `version 0.3.1` installs it
+    Version {
+        /// Version to install (e.g. 0.3.1, or "latest"). Omit for the interactive picker.
+        version: Option<String>,
+        /// Reinstall even if that version is already installed
+        #[arg(long)]
+        force: bool,
+        /// Plain output (no TUI)
+        #[arg(long)]
+        no_tui: bool,
     },
     /// Run Composer with the project's PHP
     #[command(disable_version_flag = true)]
@@ -210,15 +225,22 @@ async fn main() -> anyhow::Result<()> {
             commands::list::run(refresh, installed).await?;
         }
         Commands::Update {
-            version,
             check,
             force,
-        } => {
-            if check {
-                commands::update::run_cleanserve_update(check, force).await?;
-            } else {
-                commands::update::run_php_update(version).await?;
+            no_tui,
+            php,
+        } => match php {
+            Some(v) => {
+                commands::update::run_php_update((!v.is_empty()).then_some(v)).await?;
             }
+            None => commands::version::run_update(check, force, no_tui).await?,
+        },
+        Commands::Version {
+            version,
+            force,
+            no_tui,
+        } => {
+            commands::version::run_version(version, force, no_tui).await?;
         }
         Commands::Composer { php, args } => {
             commands::composer::run(args, php).await?;

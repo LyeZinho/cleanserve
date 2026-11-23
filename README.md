@@ -47,17 +47,11 @@ curl -fsSL https://raw.githubusercontent.com/LyeZinho/cleanserve/main/install.sh
 
 ## 🛠 How to Use
 
-### 1\. Initialize a Project
+### 1\. Start a Project
 
-Navigate to your PHP project folder and run:
+Existing project: just run `cleanserve up`. If there is no `cleanserve.json`, it is created automatically from your `composer.json` (`cleanserve init` is optional, for pinning options up front).
 
-```bash
-cleanserve init
-```
-
-This will create a `cleanserve.json` file based on your `composer.json`.
-
-To scaffold a new app (Yii, Laravel, Symfony, …) without a system PHP:
+To scaffold a new app (Yii, Laravel, Symfony, …) without a system PHP, no `init` needed — `create-project` initializes the new directory for you:
 
 ```bash
 cleanserve composer create-project yiisoft/app your_project

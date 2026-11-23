@@ -127,6 +127,10 @@ else
 fi
 
 INSTALLED_NAME="${BINARY_NAME}"
+# Short alias: `cs` -> cleanserve
+if [ "${OS_NAME}" != "windows" ]; then
+  ln -sf "${INSTALL_DIR}/${BINARY_NAME}" "${INSTALL_DIR}/cs" 2>/dev/null || true
+fi
 [ "${OS_NAME}" = "windows" ] && INSTALLED_NAME="${BINARY_NAME}.exe"
 
 if "${INSTALL_DIR}/${INSTALLED_NAME}" --version >/dev/null 2>&1; then
